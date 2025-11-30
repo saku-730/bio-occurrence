@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # --- 1. RDF Store (Apache Jena Fuseki) ---
+  fuseki:
+    image: stain/jena-fuseki:latest
+    container_name: bio_fuseki
+    ports:
+      - "3030:3030"
+    environment:
+      - ADMIN_PASSWORD=admin123
+      # 【重要】起動時に 'biodb' というデータセットを TDB2形式で作る設定
+      - FUSEKI_DATASET_1=biodb
+      #- FUSEKI_HOME=/fuseki
+      - FUSEKI_BASE=/fuseki
+    volumes:
+      # ホストの ./docker_data/fuseki を、コンテナ内の /fuseki にマウント
+      # これでコンテナを消してもデータが残る！
+      - ./docker_data/fuseki:/fuseki
+    #command: >
+     # /jena-fuseki/fuseki-server
+     # --loc=/fuseki/databases/biodb /biodb
+    networks:
+      - bio_network
+
+  # --- 2. User & Auth DB (PostgreSQL) ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: bio_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=bio_user
+      - POSTGRES_PASSWORD=postgres_pass
+      - POSTGRES_DB=bio_auth
+    volumes:
+      - ./docker_data/postgres:/var/lib/postgresql/data
+    networks:
+      - bio_network
+
+  # --- 3. Search Engine (Meilisearch) ---
+  meilisearch:
+    image: getmeili/meilisearch:v1.3
+    container_name: bio_meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_MASTER_KEY=masterKey123
+    volumes:
+      - ./docker_data/meilisearch:/meili_data
+    networks:
+      - bio_network
+
+networks:
+  bio_network:
+    driver: bridge
