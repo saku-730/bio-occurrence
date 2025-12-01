@@ -1,3 +1,5 @@
 backend/data/ontologies/
 
 .env*
+
+docker_data/
