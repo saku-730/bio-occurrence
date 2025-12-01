@@ -95,4 +95,3 @@ func sendUpdate(sparql string) error {
 	}
 	return nil
 }
-

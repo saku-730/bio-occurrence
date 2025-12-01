@@ -10,6 +10,8 @@ import (
 
 // 設定定数 (本来は環境変数から読むべき)
 const (
+	MeiliURL    = "http://localhost:7700"
+	MeiliKey    = "masterKey123"
 	FusekiURL  = "http://localhost:3030/biodb"
 	FusekiUser = "admin"
 	FusekiPass = "admin123"
@@ -19,7 +21,10 @@ func main() {
 	// 1. 依存関係の組み立て (DI)
 	// Repository -> Service -> Handler -> Router
 	repo := repository.NewOccurrenceRepository(FusekiURL, FusekiUser, FusekiPass)
-	svc := service.NewOccurrenceService(repo)
+	searchRepo := repository.NewSearchRepository(MeiliURL, MeiliKey)
+
+	svc := service.NewOccurrenceService(repo, searchRepo)
+
 	h := handler.NewOccurrenceHandler(svc)
 	
 	r := router.SetupRouter(h)

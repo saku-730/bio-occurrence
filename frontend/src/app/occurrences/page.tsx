@@ -21,7 +21,7 @@ export default function OccurrenceList() {
         const res = await fetch("http://localhost:8080/api/occurrences");
         if (!res.ok) throw new Error("取得失敗");
         const data = await res.json();
-        setList(data);
+        setList(data || []);
       } catch (err) {
         console.error(err);
       } finally {

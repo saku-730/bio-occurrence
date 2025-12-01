@@ -19,17 +19,38 @@ type OccurrenceService interface {
 
 type occurrenceService struct {
 	repo repository.OccurrenceRepository
+	searchRepo repository.SearchRepository
 }
 
-func NewOccurrenceService(repo repository.OccurrenceRepository) OccurrenceService {
-	return &occurrenceService{repo: repo}
+func NewOccurrenceService(
+	repo repository.OccurrenceRepository,
+	searchRepo repository.SearchRepository,
+) OccurrenceService {
+	return &occurrenceService{
+		repo:       repo,
+		searchRepo: searchRepo,
+	}
 }
+
 
 func (s *occurrenceService) Register(req model.OccurrenceRequest) (string, error) {
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
+	
+	// 1. Fusekiに保存 (これが正)
 	err := s.repo.Create(occURI, req)
-	return occURI, err
+	if err != nil {
+		return "", err
+	}
+
+	// 2. Meilisearchにも保存 (検索用インデックス)
+	// ※ここが失敗してもエラーにはせず、ログ出力にとどめる設計もあるが、今回はエラーを返す
+	if err := s.searchRepo.IndexOccurrence(req, occURI); err != nil {
+		// 本当はFusekiをロールバックするか、非同期でリトライすべきだけど簡易実装
+		return occURI, err 
+	}
+
+	return occURI, nil
 }
 
 func (s *occurrenceService) GetAll() ([]model.OccurrenceListItem, error) {
@@ -44,12 +65,26 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 
 func (s *occurrenceService) Modify(id string, req model.OccurrenceRequest) error {
 	targetURI := "http://my-db.org/occ/" + id
-	return s.repo.Update(targetURI, req)
+	
+	// 1. Fuseki更新
+	if err := s.repo.Update(targetURI, req); err != nil {
+		return err
+	}
+	
+	// 2. Meilisearch更新 (上書き)
+	return s.searchRepo.IndexOccurrence(req, targetURI)
 }
 
 func (s *occurrenceService) Remove(id string) error {
 	targetURI := "http://my-db.org/occ/" + id
-	return s.repo.Delete(targetURI)
+	
+	// 1. Fuseki削除
+	if err := s.repo.Delete(targetURI); err != nil {
+		return err
+	}
+	
+	// 2. Meilisearch削除
+	return s.searchRepo.DeleteOccurrence(targetURI)
 }
 
 func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, error) {
@@ -57,3 +92,4 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	taxonURI := "http://purl.obolibrary.org/obo/" + safeID
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
+
