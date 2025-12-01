@@ -39,6 +39,7 @@ func SetupRouter(occHandler *handler.OccurrenceHandler) *gin.Engine {
 		api.PUT("/occurrences/:id", occHandler.Update)
 		api.DELETE("/occurrences/:id", occHandler.Delete)
 
+		api.GET("/search", occHandler.Search)
 	}
 
 	return r

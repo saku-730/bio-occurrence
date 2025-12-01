@@ -15,6 +15,7 @@ type OccurrenceService interface {
 	Modify(id string, req model.OccurrenceRequest) error
 	Remove(id string) error
 	GetTaxonStats(rawID string) (*model.TaxonStats, error)
+	Search(query string) ([]repository.OccurrenceDocument, error)
 }
 
 type occurrenceService struct {
@@ -91,5 +92,9 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	safeID := strings.ReplaceAll(rawID, ":", "_")
 	taxonURI := "http://purl.obolibrary.org/obo/" + safeID
 	return s.repo.GetTaxonStats(taxonURI, rawID)
+}
+
+func (s *occurrenceService) Search(query string) ([]repository.OccurrenceDocument, error) {
+	return s.searchRepo.Search(query)
 }
 

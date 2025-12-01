@@ -43,7 +43,7 @@ services:
 
   # --- 3. Search Engine (Meilisearch) ---
   meilisearch:
-    image: getmeili/meilisearch:v1.3
+    image: getmeili/meilisearch:v1.13
     container_name: bio_meilisearch
     ports:
       - "7700:7700"

@@ -94,3 +94,18 @@ func (h *OccurrenceHandler) GetTaxonStats(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, stats)
 }
+
+func (h *OccurrenceHandler) Search(c *gin.Context) {
+	query := c.Query("q") // URLの ?q=... を取得
+
+	// Service経由で検索実行
+	docs, err := h.svc.Search(query)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 結果を返す (空の場合は [] が返る)
+	c.JSON(http.StatusOK, docs)
+}
+
