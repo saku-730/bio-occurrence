@@ -13,8 +13,10 @@ services:
       - FUSEKI_DATASET_1=biodb
       #- FUSEKI_HOME=/fuseki
       - FUSEKI_BASE=/fuseki
+      - JAVA_OPTIONS=-Xmx2048m
     volumes:
       # ホストの ./docker_data/fuseki を、コンテナ内の /fuseki にマウント
+      - ./backend/data/ontologies:/fuseki/data/ontologies:ro
       # これでコンテナを消してもデータが残る！
       - ./docker_data/fuseki:/fuseki
     #command: >
@@ -22,6 +24,7 @@ services:
      # --loc=/fuseki/databases/biodb /biodb
     networks:
       - bio_network
+    mem_limit: 5120m
 
   # --- 2. User & Auth DB (PostgreSQL) ---
   postgres:
