@@ -10,8 +10,8 @@ import (
 
 // 設定定数 (本来は環境変数から読むべき)
 const (
-	MeiliURL    = "http://localhost:7700"
-	MeiliKey    = "masterKey123"
+	MeiliURL   = "http://localhost:7700"
+	MeiliKey   = "masterKey123"
 	FusekiURL  = "http://localhost:3030/biodb"
 	FusekiUser = "admin"
 	FusekiPass = "admin123"
