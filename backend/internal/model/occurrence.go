@@ -2,8 +2,8 @@ package model
 
 // APIのリクエストで受け取るデータ
 type OccurrenceRequest struct {
-	TaxonID    string  `json:"taxon_id" binding:"required"`
-	TaxonLabel string  `json:"taxon_label" binding:"required"`
+	TaxonID    string  `json:"taxon_id"`
+	TaxonLabel string  `json:"taxon_label"`
 	Traits     []Trait `json:"traits"`
 	Remarks    string  `json:"remarks"`
 }
