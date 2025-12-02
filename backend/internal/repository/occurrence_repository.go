@@ -16,10 +16,10 @@ import (
 
 // Repositoryのインターフェース
 type OccurrenceRepository interface {
-	Create(uri string, req model.OccurrenceRequest) error
+	Create(uri string, userID string, req model.OccurrenceRequest) error
 	FindAll() ([]model.OccurrenceListItem, error)
 	FindByID(uri string) (*model.OccurrenceDetail, error)
-	Update(uri string, req model.OccurrenceRequest) error
+	Update(uri string, userID string, req model.OccurrenceRequest) error
 	Delete(uri string) error
 	GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error)
 }
@@ -48,8 +48,8 @@ func NewOccurrenceRepository(baseURL, user, pass string) OccurrenceRepository {
 // CRUD実装
 // ---------------------------------------------------
 
-func (r *occurrenceRepository) Create(uri string, req model.OccurrenceRequest) error {
-	sparql, err := r.buildInsertSPARQL(uri, req)
+func (r *occurrenceRepository) Create(uri string,userID string, req model.OccurrenceRequest) error {
+	sparql, err := r.buildInsertSPARQL(uri,userID, req)
 	if err != nil {
 		return err
 	}
@@ -131,14 +131,14 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 	return detail, nil
 }
 
-func (r *occurrenceRepository) Update(uri string, req model.OccurrenceRequest) error {
+func (r *occurrenceRepository) Update(uri string,userID string, req model.OccurrenceRequest) error {
 	// 1. 削除
 	deleteSparql := fmt.Sprintf("DELETE WHERE { <%s> ?p ?o }", uri)
 	if err := r.sendUpdate(deleteSparql); err != nil {
 		return fmt.Errorf("failed to delete old data: %w", err)
 	}
 	// 2. 登録
-	insertSparql, err := r.buildInsertSPARQL(uri, req)
+	insertSparql, err := r.buildInsertSPARQL(uri, userID, req)
 	if err != nil {
 		return err
 	}
@@ -187,10 +187,11 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 // ---------------------------------------------------
 
 // SPARQL INSERT文を組み立てる
-func (r *occurrenceRepository) buildInsertSPARQL(uri string, req model.OccurrenceRequest) (string, error) {
+func (r *occurrenceRepository) buildInsertSPARQL(uri string, userID string, req model.OccurrenceRequest) (string, error) {
 	const tpl = `
 PREFIX ex: <http://my-db.org/data/>
 PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
+PREFIX dcterms: <http://purl.org/dc/terms/>
 PREFIX ro: <http://purl.obolibrary.org/obo/RO_>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
@@ -199,6 +200,7 @@ INSERT DATA {
     a dwc:Occurrence ;
     dwc:scientificNameID <http://purl.obolibrary.org/obo/{{.TaxonIDSafe}}> ;
     dwc:scientificName "{{.TaxonLabel}}" ;
+    dcterms:creator <http://my-db.org/user/{{.UserID}}> ;
     dwc:occurrenceRemarks "{{.Remarks}}" .
 
   {{range .Traits}}
@@ -211,12 +213,13 @@ INSERT DATA {
 		IDSafe, Label string
 	}
 	data := struct {
-		URI, TaxonIDSafe, TaxonLabel, Remarks string
+		URI, TaxonIDSafe, TaxonLabel, Remarks, UserID string
 		Traits                                []TraitSafe
 	}{
 		URI:         uri,
 		TaxonIDSafe: strings.ReplaceAll(req.TaxonID, ":", "_"),
 		TaxonLabel:  req.TaxonLabel,
+		UserID: userID,
 		Remarks:     req.Remarks,
 	}
 	for _, t := range req.Traits {

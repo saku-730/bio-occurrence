@@ -24,7 +24,13 @@ func (h *OccurrenceHandler) Create(c *gin.Context) {
 		return
 	}
 
-	id, err := h.svc.Register(req)
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := h.svc.Register(userID.(string), req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -67,7 +73,15 @@ func (h *OccurrenceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	if err := h.svc.Modify(id, req); err != nil {
+	// ★修正ポイント: ユーザーIDの取得と存在チェック
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// ★修正ポイント: カンマ(,)ではなくドット(.)で型アサーション
+	if err := h.svc.Modify(userID.(string), id, req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -77,6 +91,8 @@ func (h *OccurrenceHandler) Update(c *gin.Context) {
 // DELETE /api/occurrences/:id
 func (h *OccurrenceHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
+	// 削除にも権限チェックを入れるならここで userID を取得して Service に渡す必要があるが、
+	// 現状の Service.Remove は userID を受け取っていないのでこのままでOK
 	if err := h.svc.Remove(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -108,4 +124,3 @@ func (h *OccurrenceHandler) Search(c *gin.Context) {
 	// 結果を返す (空の場合は [] が返る)
 	c.JSON(http.StatusOK, docs)
 }
-

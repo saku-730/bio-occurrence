@@ -34,26 +34,36 @@ func SetupRouter(
 		MaxAge:           12 * time.Hour,
 	}))
 
-	auth := r.Group("/api/auth")
-	{
-		auth.POST("/register", authHandler.Register)
-		auth.POST("/login", authHandler.Login)
-	}
-	// APIルート定義
-
 	api := r.Group("/api")
+
 	{
 		api.GET("/occurrences", occHandler.GetAll)
 		api.GET("/occurrences/:id", occHandler.GetDetail)
 		api.GET("/search", occHandler.Search)
 
-		authorized := api.Group("/")
-		authorized.Use(middleware.AuthRequired())
+	//	authorized := api.Group("/")
+	//	authorized.Use(middleware.AuthRequired())
+//		{
+//			authorized.POST("/occurrences", occHandler.Create)
+//			authorized.PUT("/occurrences/:id", occHandler.Update)
+//			authorized.DELETE("/occurrences/:id", occHandler.Delete)
+//		}
+
+
+	auth := api.Group("/auth")
+	{
+		auth.POST("/register", authHandler.Register)
+		auth.POST("/login", authHandler.Login)
+	}
+		protected := api.Group("/")
+		protected.Use(middleware.AuthRequired())
+
 		{
-			authorized.POST("/occurrences", occHandler.Create)
-			authorized.PUT("/occurrences/:id", occHandler.Update)
-			authorized.DELETE("/occurrences/:id", occHandler.Delete)
+			protected.POST("/occurrences", occHandler.Create)
+			protected.PUT("/occurrences/:id", occHandler.Update)
+			protected.DELETE("/occurrences/:id", occHandler.Delete)
 		}
 	}
+
 	return r
 }

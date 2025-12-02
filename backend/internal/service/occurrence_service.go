@@ -9,10 +9,10 @@ import (
 )
 
 type OccurrenceService interface {
-	Register(req model.OccurrenceRequest) (string, error)
+	Register(userID string, req model.OccurrenceRequest) (string, error)
 	GetAll() ([]model.OccurrenceListItem, error)
 	GetDetail(id string) (*model.OccurrenceDetail, error)
-	Modify(id string, req model.OccurrenceRequest) error
+	Modify(userID string, id string, req model.OccurrenceRequest) error
 	Remove(id string) error
 	GetTaxonStats(rawID string) (*model.TaxonStats, error)
 	Search(query string) ([]repository.OccurrenceDocument, error)
@@ -33,19 +33,16 @@ func NewOccurrenceService(
 	}
 }
 
-
-func (s *occurrenceService) Register(req model.OccurrenceRequest) (string, error) {
+func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest) (string, error) {
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
 	
 	// 1. Fusekiに保存 (これが正)
-	err := s.repo.Create(occURI, req)
+	err := s.repo.Create(occURI, userID, req)
 	if err != nil {
 		return "", err
 	}
 
-	// 2. Meilisearchにも保存 (検索用インデックス)
-	// ※ここが失敗してもエラーにはせず、ログ出力にとどめる設計もあるが、今回はエラーを返す
 	if err := s.searchRepo.IndexOccurrence(req, occURI); err != nil {
 		// 本当はFusekiをロールバックするか、非同期でリトライすべきだけど簡易実装
 		return occURI, err 
@@ -64,11 +61,11 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 	return s.repo.FindByID(targetURI)
 }
 
-func (s *occurrenceService) Modify(id string, req model.OccurrenceRequest) error {
+func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
 	targetURI := "http://my-db.org/occ/" + id
 	
 	// 1. Fuseki更新
-	if err := s.repo.Update(targetURI, req); err != nil {
+	if err := s.repo.Update(targetURI,userID, req); err != nil {
 		return err
 	}
 	
