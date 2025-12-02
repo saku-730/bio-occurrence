@@ -3,7 +3,9 @@ package handler
 import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"github.com/saku-730/bio-occurrence/backend/internal/service"
+	"github.com/saku-730/bio-occurrence/backend/internal/utils"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,7 +43,10 @@ func (h *OccurrenceHandler) Create(c *gin.Context) {
 
 // GET /api/occurrences
 func (h *OccurrenceHandler) GetAll(c *gin.Context) {
-	list, err := h.svc.GetAll()
+	// ★修正: 任意認証でユーザーIDを取得して渡す
+	userID := h.getOptionalUserID(c)
+	
+	list, err := h.svc.GetAll(userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -73,14 +78,12 @@ func (h *OccurrenceHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// ★修正ポイント: ユーザーIDの取得と存在チェック
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	// ★修正ポイント: カンマ(,)ではなくドット(.)で型アサーション
 	if err := h.svc.Modify(userID.(string), id, req); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -91,9 +94,14 @@ func (h *OccurrenceHandler) Update(c *gin.Context) {
 // DELETE /api/occurrences/:id
 func (h *OccurrenceHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
-	// 削除にも権限チェックを入れるならここで userID を取得して Service に渡す必要があるが、
-	// 現状の Service.Remove は userID を受け取っていないのでこのままでOK
-	if err := h.svc.Remove(id); err != nil {
+	
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	if err := h.svc.Remove(userID.(string), id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -111,16 +119,44 @@ func (h *OccurrenceHandler) GetTaxonStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// GET /api/search
 func (h *OccurrenceHandler) Search(c *gin.Context) {
-	query := c.Query("q") // URLの ?q=... を取得
+	query := c.Query("q")
+	
+	// ★修正: 任意認証でユーザーIDを取得
+	userID := h.getOptionalUserID(c)
 
-	// Service経由で検索実行
-	docs, err := h.svc.Search(query)
+	// Service経由で検索実行 (userIDも渡す)
+	docs, err := h.svc.Search(query, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	// 結果を返す (空の場合は [] が返る)
 	c.JSON(http.StatusOK, docs)
+}
+
+// ---------------------------------------------------
+// Helper Methods
+// ---------------------------------------------------
+
+// getOptionalUserID: トークンがあればユーザーIDを返し、なければ空文字を返す
+func (h *OccurrenceHandler) getOptionalUserID(c *gin.Context) string {
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		return ""
+	}
+
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+
+	// トークンを検証してIDを取り出す
+	claims, err := utils.ParseToken(parts[1])
+	if err != nil {
+		return "" // 無効なトークンなら未ログイン扱い
+	}
+
+	return claims.UserID
 }

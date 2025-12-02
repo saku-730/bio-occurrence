@@ -10,15 +10,13 @@ import (
 )
 
 type OccurrenceService interface {
-	// 引数に userID を追加
 	Register(userID string, req model.OccurrenceRequest) (string, error)
-	GetAll() ([]model.OccurrenceListItem, error)
+	GetAll(currentUserID string) ([]model.OccurrenceListItem, error)
 	GetDetail(id string) (*model.OccurrenceDetail, error)
-	// 引数に userID を追加
 	Modify(userID string, id string, req model.OccurrenceRequest) error
-	Remove(id string) error
+	Remove(userID string, id string) error
 	GetTaxonStats(rawID string) (*model.TaxonStats, error)
-	Search(query string) ([]repository.OccurrenceDocument, error)
+	Search(query string, currentUserID string) ([]repository.OccurrenceDocument, error)
 }
 
 type occurrenceService struct {
@@ -68,8 +66,8 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 	return occURI, nil
 }
 
-func (s *occurrenceService) GetAll() ([]model.OccurrenceListItem, error) {
-	list, err := s.repo.FindAll()
+func (s *occurrenceService) GetAll(currentUserID string) ([]model.OccurrenceListItem, error) {
+	list, err := s.repo.FindAll(currentUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -112,26 +110,48 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 }
 
 func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
-	// 更新時もユーザー情報を取得
+	targetURI := "http://my-db.org/occ/" + id
+
+	// ★追加: まず既存データを取得して所有者チェック！
+	existing, err := s.repo.FindByID(targetURI)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("not found")
+	}
+	// 持ち主じゃなかったらエラー！
+	if existing.OwnerID != userID {
+		return fmt.Errorf("permission denied: あなたのデータではない")
+	}
+
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil || user == nil {
 		return fmt.Errorf("failed to find user")
 	}
 
-	targetURI := "http://my-db.org/occ/" + id
-	
-	// 1. Fuseki更新
 	if err := s.repo.Update(targetURI, userID, req); err != nil {
 		return err
 	}
 	
-	// 2. Meilisearch更新
 	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username)
 }
 
-func (s *occurrenceService) Remove(id string) error {
+func (s *occurrenceService) Remove(userID string, id string) error {
 	targetURI := "http://my-db.org/occ/" + id
 	
+	// ★追加: 所有者チェック！
+	existing, err := s.repo.FindByID(targetURI)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("not found")
+	}
+	if existing.OwnerID != userID {
+		return fmt.Errorf("permission denied: 他人のデータは消せない")
+	}
+
 	// 1. Fuseki削除
 	if err := s.repo.Delete(targetURI); err != nil {
 		return err
@@ -147,6 +167,6 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
 
-func (s *occurrenceService) Search(query string) ([]repository.OccurrenceDocument, error) {
-	return s.searchRepo.Search(query)
+func (s *occurrenceService) Search(query string, currentUserID string) ([]repository.OccurrenceDocument, error) {
+	return s.searchRepo.Search(query, currentUserID)
 }

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation"; // ★ここが変わった
-import { Loader2, ArrowLeft, Tag } from "lucide-react";
-import { Pencil, Trash2 } from "lucide-react"
+import { useSearchParams, useRouter } from "next/navigation";
+import { Loader2, ArrowLeft, Tag, Pencil, Trash2 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext"; // ★追加: AuthContextを使う
 
 type Trait = {
   id: string;
@@ -18,29 +18,43 @@ type DetailData = {
   owner_name?: string;
 };
 
-// 中身のコンポーネント（データ取得ロジック）
 function DetailContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { token } = useAuth(); // ★追加: トークンを取り出す
   
-  // URLの ?id=... を取得するのだ
   const id = searchParams.get("id");
 
   const [data, setData] = useState<DetailData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // 削除処理の修正
   const handleDelete = async () => {
-    if (!confirm("削除してもよろしいですか？この操作は取り消せません。")) return;
+    if (!token) {
+      alert("削除するにはログインが必要なのだ！");
+      router.push("/login");
+      return;
+    }
+
+    if (!confirm("本当に削除してもよろしいですか？この操作は取り消せません。")) return;
     
     try {
       const res = await fetch(`http://localhost:8080/api/occurrences/${id}`, {
         method: "DELETE",
+        headers: { 
+            "Authorization": `Bearer ${token}` // ★追加: これがないと401になる！
+        },
       });
-      if (!res.ok) throw new Error("削除失敗");
+      
+      if (!res.ok) {
+        if (res.status === 401) throw new Error("認証エラー：ログインし直してください");
+        throw new Error("削除失敗");
+      }
       
       alert("削除したのだ！");
-      router.push("/occurrences"); // 一覧に戻る
-    } catch (err) {
-      alert("エラーなのだ");
+      router.push("/occurrences"); 
+    } catch (err: any) {
+      alert(err.message || "エラーなのだ");
     }
   };
 
@@ -73,7 +87,6 @@ function DetailContent() {
           <ArrowLeft className="h-4 w-4 mr-1" /> 一覧に戻る
         </button>
 
-        {/* 操作ボタン群 */}
         <div className="flex gap-2">
           <button 
             onClick={() => router.push(`/occurrences/edit?id=${id}`)}
@@ -93,9 +106,11 @@ function DetailContent() {
       <h1 className="text-4xl font-bold text-gray-900 mb-2">
         {data.taxon_label}
       </h1>
+      
       <div className="text-sm text-gray-600 mb-1">
-	  登録者: <span className="font-bold">{data.owner_name || "不明"}</span>
+        登録者: <span className="font-bold">{data.owner_name || "不明"}</span>
       </div>
+
       <div className="text-xs text-gray-400 font-mono mb-8 break-all">
         URI: {data.id}
       </div>
@@ -126,7 +141,6 @@ function DetailContent() {
   );
 }
 
-// メインコンポーネント（Suspenseで囲むのが必須ルール！）
 export default function OccurrenceDetail() {
   return (
     <main className="min-h-screen bg-gray-50 py-10 px-4">

@@ -6,6 +6,7 @@ type OccurrenceRequest struct {
 	TaxonLabel string  `json:"taxon_label"`
 	Traits     []Trait `json:"traits"`
 	Remarks    string  `json:"remarks"`
+	IsPublic   bool    `json:"is_public"`
 }
 
 // 形質データ

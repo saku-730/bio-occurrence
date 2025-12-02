@@ -2,13 +2,12 @@ package repository
 
 import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
-	"fmt"
 	"encoding/json"
+	"fmt"
 
 	"github.com/meilisearch/meilisearch-go"
 )
 
-// Meilisearchに登録するドキュメントの形
 type OccurrenceDocument struct {
 	ID         string   `json:"id"`
 	TaxonID    string   `json:"taxon_id"`
@@ -17,12 +16,13 @@ type OccurrenceDocument struct {
 	Traits     []string `json:"traits"`
 	OwnerID    string   `json:"owner_id"`
 	OwnerName  string   `json:"owner_name"`
+	IsPublic   bool     `json:"is_public"`
 }
 
 type SearchRepository interface {
 	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
 	DeleteOccurrence(id string) error
-	Search(query string) ([]OccurrenceDocument, error)
+	Search(query string, currentUserID string) ([]OccurrenceDocument, error) // ★引数追加
 }
 
 type searchRepository struct {
@@ -34,24 +34,19 @@ func NewSearchRepository(url, key string) SearchRepository {
 	client := meilisearch.New(url, meilisearch.WithAPIKey(key))
 	indexName := "occurrences"
 
-	// ★修正点1: プライマリキーを "id" に設定する処理を追加
-	// これをやらないと、id と taxon_id で迷ってエラーになるのだ
-	_, err := client.Index(indexName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
-		PrimaryKey: "id",
-	})
-	if err != nil {
-		// インデックスがまだない場合などはエラーになることもあるが、ログに出すだけでOK
-		fmt.Printf("⚠️ Index update info: %v\n", err)
-	}
-
-	// フィルタリング設定（既存のコード）
-	filterAttributes := []string{"traits", "taxon_label"}
+	// ★フィルタ用属性に is_public, owner_id を追加
+	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id"}
 	convertedAttributes := make([]interface{}, len(filterAttributes))
 	for i, v := range filterAttributes {
 		convertedAttributes[i] = v
 	}
 
 	client.Index(indexName).UpdateFilterableAttributes(&convertedAttributes)
+	
+	// Primary Keyの設定も忘れずに
+	client.Index(indexName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
+		PrimaryKey: "id",
+	})
 	
 	return &searchRepository{
 		client:    client,
@@ -66,8 +61,9 @@ func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri stri
 		TaxonLabel: req.TaxonLabel,
 		Remarks:    req.Remarks,
 		Traits:     make([]string, len(req.Traits)),
-		OwnerID:    ownerID,   // ★セット
-		OwnerName:  ownerName, // ★セット
+		OwnerID:    ownerID,
+		OwnerName:  ownerName,
+		IsPublic:   req.IsPublic,
 	}
 	
 	for i, t := range req.Traits {
@@ -87,10 +83,16 @@ func (r *searchRepository) DeleteOccurrence(uri string) error {
 	return err
 }
 
-func (r *searchRepository) Search(query string) ([]OccurrenceDocument, error) {
-	// 検索実行
+func (r *searchRepository) Search(query string, currentUserID string) ([]OccurrenceDocument, error) {
+	// フィルタリングロジック
+	filter := "is_public = true"
+	if currentUserID != "" {
+		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
+	}
+
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
-		Limit: 20,
+		Limit:  20,
+		Filter: filter, // ★適用
 	})
 	if err != nil {
 		return nil, err
@@ -98,10 +100,7 @@ func (r *searchRepository) Search(query string) ([]OccurrenceDocument, error) {
 
 	var docs []OccurrenceDocument
 	
-	// ★修正箇所: スマートな変換ロジック
 	for _, hit := range searchRes.Hits {
-		// 1. hit (interface{}) を一度 JSONバイト列に戻す
-		// (これで hit が map でも RawMessage でも関係なくなる！)
 		data, err := json.Marshal(hit)
 		if err != nil {
 			continue
@@ -118,7 +117,6 @@ func (r *searchRepository) Search(query string) ([]OccurrenceDocument, error) {
 	return docs, nil
 }
 
-// ヘルパー: URIからID抽出
 func getIDFromURI(uri string) string {
 	for i := len(uri) - 1; i >= 0; i-- {
 		if uri[i] == '/' {

@@ -8,23 +8,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-//	"net/url"
 	"strings"
 	"text/template"
 	"time"
 )
 
-// Repositoryのインターフェース
 type OccurrenceRepository interface {
 	Create(uri string, userID string, req model.OccurrenceRequest) error
-	FindAll() ([]model.OccurrenceListItem, error)
+	FindAll(currentUserID string) ([]model.OccurrenceListItem, error)
 	FindByID(uri string) (*model.OccurrenceDetail, error)
 	Update(uri string, userID string, req model.OccurrenceRequest) error
 	Delete(uri string) error
 	GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error)
 }
 
-// 実装構造体
 type occurrenceRepository struct {
 	updateURL string
 	queryURL  string
@@ -33,7 +30,6 @@ type occurrenceRepository struct {
 	client    *http.Client
 }
 
-// コンストラクタ
 func NewOccurrenceRepository(baseURL, user, pass string) OccurrenceRepository {
 	return &occurrenceRepository{
 		updateURL: baseURL + "/update",
@@ -44,22 +40,25 @@ func NewOccurrenceRepository(baseURL, user, pass string) OccurrenceRepository {
 	}
 }
 
-// ---------------------------------------------------
-// CRUD実装
-// ---------------------------------------------------
-
-func (r *occurrenceRepository) Create(uri string,userID string, req model.OccurrenceRequest) error {
-	sparql, err := r.buildInsertSPARQL(uri,userID, req)
+func (r *occurrenceRepository) Create(uri string, userID string, req model.OccurrenceRequest) error {
+	sparql, err := r.buildInsertSPARQL(uri, userID, req)
 	if err != nil {
 		return err
 	}
 	return r.sendUpdate(sparql)
 }
 
-func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
-	query := `
+func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.OccurrenceListItem, error) {
+	// フィルタリングロジック: 公開 or 自分のデータ
+	filter := "(!BOUND(?vis) || ?vis = \"public\")"
+	if currentUserID != "" {
+		filter += fmt.Sprintf(" || (BOUND(?creator) && str(?creator) = \"http://my-db.org/user/%s\")", currentUserID)
+	}
+
+	query := fmt.Sprintf(`
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
 		PREFIX dcterms: <http://purl.org/dc/terms/>
+		PREFIX ex: <http://my-db.org/data/>
 		
 		SELECT ?id ?taxonName ?remarks ?creator
 		WHERE {
@@ -67,9 +66,13 @@ func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
 				dwc:scientificName ?taxonName .
 			OPTIONAL { ?id dwc:occurrenceRemarks ?remarks }
 			OPTIONAL { ?id dcterms:creator ?creator }
+			OPTIONAL { ?id ex:visibility ?vis }
+
+			FILTER (%s)
 		}
 		LIMIT 100
-	`
+	`, filter)
+	
 	results, err := r.sendQuery(query)
 	if err != nil {
 		return nil, err
@@ -77,7 +80,6 @@ func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
 
 	var list []model.OccurrenceListItem
 	for _, b := range results {
-		// URI (http://my-db.org/user/UUID) から UUID だけ抜く
 		creatorURI := safeValue(b, "creator")
 		ownerID := ""
 		if creatorURI != "" {
@@ -89,32 +91,32 @@ func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
 			ID:        b["id"].Value,
 			TaxonName: b["taxonName"].Value,
 			Remarks:   safeValue(b, "remarks"),
-			OwnerID:   ownerID, // ★セット
-			// OwnerName はここでは分からないので Service層で埋める
+			OwnerID:   ownerID,
 		})
 	}
 	return list, nil
 }
 
-// FindByID の修正
 func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, error) {
 	query := fmt.Sprintf(`
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
 		PREFIX ro: <http://purl.obolibrary.org/obo/RO_>
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 		PREFIX dcterms: <http://purl.org/dc/terms/>
+		PREFIX ex: <http://my-db.org/data/>
 
-		SELECT ?taxonName ?remarks ?traitID ?traitLabel ?creator
+		SELECT ?taxonName ?remarks ?traitID ?traitLabel ?creator ?vis
 		WHERE {
 			<%s> dwc:scientificName ?taxonName .
 			OPTIONAL { <%s> dwc:occurrenceRemarks ?remarks }
 			OPTIONAL { <%s> dcterms:creator ?creator }
+			OPTIONAL { <%s> ex:visibility ?vis }
 			OPTIONAL {
 				<%s> ro:0000053 ?traitID .
 				OPTIONAL { ?traitID rdfs:label ?traitLabel }
 			}
 		}
-	`, uri, uri, uri, uri)
+	`, uri, uri, uri, uri, uri)
 
 	results, err := r.sendQuery(query)
 	if err != nil {
@@ -124,7 +126,6 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 		return nil, nil
 	}
 
-	// Creator IDの抽出
 	creatorURI := safeValue(results[0], "creator")
 	ownerID := ""
 	if creatorURI != "" {
@@ -136,7 +137,7 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 		ID:        uri,
 		TaxonName: results[0]["taxonName"].Value,
 		Remarks:   safeValue(results[0], "remarks"),
-		OwnerID:   ownerID, // ★セット
+		OwnerID:   ownerID,
 		Traits:    []model.Trait{},
 	}
 
@@ -152,22 +153,20 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 			}
 		}
 	}
-
 	return detail, nil
 }
 
-func (r *occurrenceRepository) Update(uri string,userID string, req model.OccurrenceRequest) error {
-	// 1. 削除
+func (r *occurrenceRepository) Update(uri string, userID string, req model.OccurrenceRequest) error {
 	deleteSparql := fmt.Sprintf("DELETE WHERE { <%s> ?p ?o }", uri)
 	if err := r.sendUpdate(deleteSparql); err != nil {
 		return fmt.Errorf("failed to delete old data: %w", err)
 	}
-	// 2. 登録
-	insertSparql, err := r.buildInsertSPARQL(uri, userID, req)
+	
+	sparql, err := r.buildInsertSPARQL(uri, userID, req)
 	if err != nil {
 		return err
 	}
-	return r.sendUpdate(insertSparql)
+	return r.sendUpdate(sparql)
 }
 
 func (r *occurrenceRepository) Delete(uri string) error {
@@ -208,11 +207,16 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 }
 
 // ---------------------------------------------------
-// 内部ヘルパー (Private)
+// Helper
 // ---------------------------------------------------
 
-// SPARQL INSERT文を組み立てる
 func (r *occurrenceRepository) buildInsertSPARQL(uri string, userID string, req model.OccurrenceRequest) (string, error) {
+	// 公開設定の判定
+	visibility := "private"
+	if req.IsPublic {
+		visibility = "public"
+	}
+
 	const tpl = `
 PREFIX ex: <http://my-db.org/data/>
 PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
@@ -226,6 +230,7 @@ INSERT DATA {
     dwc:scientificNameID <http://purl.obolibrary.org/obo/{{.TaxonIDSafe}}> ;
     dwc:scientificName "{{.TaxonLabel}}" ;
     dcterms:creator <http://my-db.org/user/{{.UserID}}> ;
+    ex:visibility "{{.Visibility}}" ;
     dwc:occurrenceRemarks "{{.Remarks}}" .
 
   {{range .Traits}}
@@ -237,15 +242,17 @@ INSERT DATA {
 	type TraitSafe struct {
 		IDSafe, Label string
 	}
+	// スペルミスを修正 (Visibillity -> Visibility)
 	data := struct {
-		URI, TaxonIDSafe, TaxonLabel, Remarks, UserID string
-		Traits                                []TraitSafe
+		URI, TaxonIDSafe, TaxonLabel, Remarks, UserID, Visibility string
+		Traits                                                    []TraitSafe
 	}{
 		URI:         uri,
 		TaxonIDSafe: strings.ReplaceAll(req.TaxonID, ":", "_"),
 		TaxonLabel:  req.TaxonLabel,
-		UserID: userID,
 		Remarks:     req.Remarks,
+		UserID:      userID,
+		Visibility:  visibility,
 	}
 	for _, t := range req.Traits {
 		data.Traits = append(data.Traits, TraitSafe{
@@ -265,7 +272,6 @@ INSERT DATA {
 	return buf.String(), nil
 }
 
-// Fusekiへ更新リクエスト(POST)を送る
 func (r *occurrenceRepository) sendUpdate(sparql string) error {
 	req, err := http.NewRequest("POST", r.updateURL, strings.NewReader(sparql))
 	if err != nil {
@@ -287,7 +293,6 @@ func (r *occurrenceRepository) sendUpdate(sparql string) error {
 	return nil
 }
 
-// Fusekiへ検索リクエスト(GET)を送る
 func (r *occurrenceRepository) sendQuery(sparql string) ([]map[string]bindingValue, error) {
 	req, err := http.NewRequest("GET", r.queryURL, nil)
 	if err != nil {
@@ -323,7 +328,6 @@ func (r *occurrenceRepository) setBasicAuth(req *http.Request) {
 	req.Header.Set("Authorization", "Basic "+encoded)
 }
 
-// JSONパース用構造体
 type sparqlResponse struct {
 	Results struct {
 		Bindings []map[string]bindingValue `json:"bindings"`
@@ -334,7 +338,6 @@ type bindingValue struct {
 	Value string `json:"value"`
 }
 
-// 安全に値を取り出すヘルパー
 func safeValue(binding map[string]bindingValue, key string) string {
 	if v, ok := binding[key]; ok {
 		return v.Value

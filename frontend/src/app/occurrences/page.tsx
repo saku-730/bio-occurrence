@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, Bug, Search, Database } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 
 // リスト表示用のデータ型
 type ListItem = {
@@ -20,6 +21,8 @@ export default function OccurrenceList() {
   const [searchQuery, setSearchQuery] = useState("");
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
+  const { token } = useAuth();
+
   // データ取得関数（検索ワードあり・なしで分岐）
   const fetchData = async (query: string) => {
     setLoading(true);
@@ -29,7 +32,12 @@ export default function OccurrenceList() {
         ? `http://localhost:8080/api/search?q=${encodeURIComponent(query)}`
         : "http://localhost:8080/api/occurrences";
 
-      const res = await fetch(url);
+      const headers: HeadersInit = {};
+      if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(url, { headers });
       if (!res.ok) throw new Error("取得失敗");
       const data = await res.json();
       
@@ -46,7 +54,7 @@ export default function OccurrenceList() {
   // 初回ロード（全件表示）
   useEffect(() => {
     fetchData("");
-  }, []);
+  }, [token]);
 
   // 検索入力のハンドリング (デバウンス処理)
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {

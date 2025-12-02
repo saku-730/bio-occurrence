@@ -29,6 +29,8 @@ export default function OccurrenceForm({ id, initialData }: Props) {
   
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
 
+  const [isPublic, setIsPublic] = useState(true);
+
   const addTrait = (item: SearchResult) => {
     if (!traits.find((t) => t.id === item.id)) {
       setTraits([...traits, item]);
@@ -56,6 +58,7 @@ export default function OccurrenceForm({ id, initialData }: Props) {
       taxon_label: taxonLabel,
       traits: traits.map((t) => ({ id: t.id, label: t.label })),
       remarks: remarks,
+      is_public: isPublic,
     };
 
     try {
@@ -142,6 +145,22 @@ export default function OccurrenceForm({ id, initialData }: Props) {
           className="w-full p-2 border border-gray-300 rounded h-24 text-black"
         />
       </div>
+
+      <div className="flex items-center gap-2 bg-gray-50 p-3 rounded border border-gray-200">
+        <input
+          type="checkbox"
+          id="isPublic"
+          checked={isPublic}
+          onChange={(e) => setIsPublic(e.target.checked)}
+          className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
+        />
+        <label htmlFor="isPublic" className="text-gray-700 font-medium cursor-pointer select-none">
+          このデータを公開する（共有）
+        </label>
+      </div>
+      <p className="text-xs text-gray-500 mb-4 pl-1">
+        ※ チェックを外すと、あなた以外には表示されなくなるのだ（プライベートモード）。
+      </p>
 
       <button
         type="submit"
