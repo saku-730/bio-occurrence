@@ -8,7 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRouter(occHandler *handler.OccurrenceHandler) *gin.Engine {
+func SetupRouter(
+	occHandler *handler.OccurrenceHandler,
+	authHandler *handler.AuthHandler,
+) *gin.Engine {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
@@ -30,6 +33,11 @@ func SetupRouter(occHandler *handler.OccurrenceHandler) *gin.Engine {
 		MaxAge:           12 * time.Hour,
 	}))
 
+	auth := r.Group("/api/auth")
+	{
+		auth.POST("/register", authHandler.Register)
+		auth.POST("/login", authHandler.Login)
+	}
 	// APIルート定義
 	api := r.Group("/api")
 	{

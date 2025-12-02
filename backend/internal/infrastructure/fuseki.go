@@ -1,20 +1,20 @@
 package infrastructure
 
 import (
-	"fmt"
 	"io"
 	"net/http"
+	"strings" // ★追加: strings.NewReaderを使うために必要
 	"time"
 )
 
 // FusekiClient: Fusekiとの通信を担当する構造体
 type FusekiClient struct {
-	BaseURL  string
+	BaseURL   string
 	UpdateURL string
 	QueryURL  string
-	Username string
-	Password string
-	Client   *http.Client
+	Username  string
+	Password  string
+	Client    *http.Client
 }
 
 func NewFusekiClient(baseURL, user, pass string) *FusekiClient {
@@ -28,13 +28,33 @@ func NewFusekiClient(baseURL, user, pass string) *FusekiClient {
 	}
 }
 
-// SendQuery: 共通のクエリ送信メソッド
+// Send: 共通のクエリ送信メソッド
+// method: "GET" or "POST"
+// url: 送信先URL
+// contentType: ヘッダー指定 (空文字なら設定しない)
+// body: 送信するデータ (SPARQLクエリなど)
 func (fc *FusekiClient) Send(method, url, contentType, body string) (*http.Response, error) {
 	var bodyReader io.Reader
+	
+	// bodyがある場合はReaderに変換する
 	if body != "" {
-		bodyReader =  // ... (strings.NewReaderなどをここに書くか、呼び出し元でやるか)
-		// 簡易化のため、ここでは strings.NewReader(body) をラップする形にするなら import "strings" 必要
+		bodyReader = strings.NewReader(body) // ★ここを修正しました
 	}
-    // ... 実装の詳細は元の sendToFuseki / queryFuseki を汎用化してここに置く
-    return nil, nil // (長くなるので省略、概念だけ)
+
+	// リクエストの作成
+	req, err := http.NewRequest(method, url, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+
+	// ヘッダー設定
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+
+	// Basic認証の設定
+	req.SetBasicAuth(fc.Username, fc.Password)
+
+	// 送信実行
+	return fc.Client.Do(req)
 }
