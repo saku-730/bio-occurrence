@@ -34,7 +34,7 @@ services:
       - "5432:5432"
     environment:
       - POSTGRES_USER=bio_user
-      - POSTGRES_PASSWORD=postgres_pass
+      - POSTGRES_PASSWORD=14afqrzv
       - POSTGRES_DB=bio_auth
     volumes:
       - ./docker_data/postgres:/var/lib/postgresql/data
