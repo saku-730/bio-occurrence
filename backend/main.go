@@ -27,19 +27,24 @@ func main() {
 	fusekiUser := getEnv("FUSEKI_USER")
 	fusekiPass := getEnv("FUSEKI_PASSWORD")
 
-	pgDB := infrastructure.NewPostgresDB(PGHost, PGPort, PGUser, PGPass, PGDB)
-	// 1. 依存関係の組み立て (DI)
+	pgDBConn := infrastructure.NewPostgresDB(PGHost, PGPort, PGUser, PGPass, PGDB)
+
+	// 2. 依存関係の組み立て (DI)
+	// リポジトリ
 	occRepo := repository.NewOccurrenceRepository(fusekiURL, fusekiUser, fusekiPass)
 	searchRepo := repository.NewSearchRepository(meiliURL, meiliKey)
-	userRepo := repository.NewUserRepository(pgDB)
+	userRepo := repository.NewUserRepository(pgDBConn)
 
-	authSvc := service.NewAuthService(userRepo)
-	svc := service.NewOccurrenceService(occRepo, searchRepo)
+	// サービス (★ここで userRepo を渡すのが重要！)
+	occSvc := service.NewOccurrenceService(occRepo, searchRepo, userRepo)
+	userSvc := service.NewUserService(userRepo)
 
-	authHandler := handler.NewAuthHandler(authSvc)
-	h := handler.NewOccurrenceHandler(svc)
-	
-	r := router.SetupRouter(h,authHandler)
+	// ハンドラー
+	occHandler := handler.NewOccurrenceHandler(occSvc)
+	userHandler := handler.NewUserHandler(userSvc)
+
+	// 3. ルーターセットアップ
+	r := router.SetupRouter(occHandler, userHandler)
 
 	// 2. サーバー起動
 	fmt.Println("🚀 APIサーバー起動: http://localhost:8080")

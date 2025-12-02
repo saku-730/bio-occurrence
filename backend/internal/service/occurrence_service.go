@@ -3,16 +3,18 @@ package service
 import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"github.com/saku-730/bio-occurrence/backend/internal/repository"
-	"strings"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 )
 
 type OccurrenceService interface {
+	// 引数に userID を追加
 	Register(userID string, req model.OccurrenceRequest) (string, error)
 	GetAll() ([]model.OccurrenceListItem, error)
 	GetDetail(id string) (*model.OccurrenceDetail, error)
+	// 引数に userID を追加
 	Modify(userID string, id string, req model.OccurrenceRequest) error
 	Remove(id string) error
 	GetTaxonStats(rawID string) (*model.TaxonStats, error)
@@ -20,15 +22,16 @@ type OccurrenceService interface {
 }
 
 type occurrenceService struct {
-	repo repository.OccurrenceRepository
+	repo       repository.OccurrenceRepository
 	searchRepo repository.SearchRepository
-	userRepo   repository.UserRepository
+	userRepo   repository.UserRepository // ★追加: ユーザー情報を引くため
 }
 
+// コンストラクタに userRepo を追加
 func NewOccurrenceService(
 	repo repository.OccurrenceRepository,
 	searchRepo repository.SearchRepository,
-	userRepo repository.UserRepository,
+	userRepo repository.UserRepository, // ★追加
 ) OccurrenceService {
 	return &occurrenceService{
 		repo:       repo,
@@ -37,8 +40,8 @@ func NewOccurrenceService(
 	}
 }
 
-
 func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest) (string, error) {
+	// 1. ユーザー情報を取得（検索インデックスに名前を入れるため）
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to find user: %w", err)
@@ -50,43 +53,32 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
 	
+	// 2. Fusekiに保存
 	err = s.repo.Create(occURI, userID, req)
 	if err != nil {
 		return "", err
 	}
 
+	// 3. Meilisearchにも保存 (ユーザーIDと名前も渡す！)
 	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username); err != nil {
+		// 検索インデックスへの登録失敗はログに出す程度でも良いが、今回はエラーを返す
 		return occURI, err 
 	}
 
 	return occURI, nil
 }
 
-
 func (s *occurrenceService) GetAll() ([]model.OccurrenceListItem, error) {
 	return s.repo.FindAll()
 }
 
 func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error) {
-	// IDからURIを復元 (本来はIDのバリデーションなどをここでする)
 	targetURI := "http://my-db.org/occ/" + id
 	return s.repo.FindByID(targetURI)
 }
 
 func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
-	targetURI := "http://my-db.org/occ/" + id
-	
-	// 1. Fuseki更新
-	if err := s.repo.Update(targetURI,userID, req); err != nil {
-		return err
-	}
-	
-	// 2. Meilisearch更新 (上書き)
-	return s.searchRepo.IndexOccurrence(req, targetURI)
-}
-
-func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
-	// 更新時もユーザー情報を再取得
+	// 更新時もユーザー情報を取得
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil || user == nil {
 		return fmt.Errorf("failed to find user")
@@ -94,14 +86,14 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 
 	targetURI := "http://my-db.org/occ/" + id
 	
+	// 1. Fuseki更新
 	if err := s.repo.Update(targetURI, userID, req); err != nil {
 		return err
 	}
 	
-	// Meilisearch更新
+	// 2. Meilisearch更新
 	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username)
 }
-
 
 func (s *occurrenceService) Remove(id string) error {
 	targetURI := "http://my-db.org/occ/" + id
@@ -124,4 +116,3 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 func (s *occurrenceService) Search(query string) ([]repository.OccurrenceDocument, error) {
 	return s.searchRepo.Search(query)
 }
-
