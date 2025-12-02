@@ -15,10 +15,12 @@ type OccurrenceDocument struct {
 	TaxonLabel string   `json:"taxon_label"`
 	Remarks    string   `json:"remarks"`
 	Traits     []string `json:"traits"`
+	OwnerID    string   `json:"owner_id"`
+	OwnerName  string   `json:"owner_name"`
 }
 
 type SearchRepository interface {
-	IndexOccurrence(req model.OccurrenceRequest, id string) error
+	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
 	DeleteOccurrence(id string) error
 	Search(query string) ([]OccurrenceDocument, error)
 }
@@ -57,13 +59,15 @@ func NewSearchRepository(url, key string) SearchRepository {
 	}
 }
 
-func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string) error {
+func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string, ownerID, ownerName string) error {
 	doc := OccurrenceDocument{
 		ID:         getIDFromURI(uri),
 		TaxonID:    req.TaxonID,
 		TaxonLabel: req.TaxonLabel,
 		Remarks:    req.Remarks,
 		Traits:     make([]string, len(req.Traits)),
+		OwnerID:    ownerID,   // ★セット
+		OwnerName:  ownerName, // ★セット
 	}
 	
 	for i, t := range req.Traits {
@@ -103,7 +107,6 @@ func (r *searchRepository) Search(query string) ([]OccurrenceDocument, error) {
 			continue
 		}
 
-		// 2. 構造体に直接マッピングする
 		var doc OccurrenceDocument
 		if err := json.Unmarshal(data, &doc); err != nil {
 			continue
@@ -114,8 +117,6 @@ func (r *searchRepository) Search(query string) ([]OccurrenceDocument, error) {
 	
 	return docs, nil
 }
-
-// getString ヘルパーはもう不要なので削除したのだ
 
 // ヘルパー: URIからID抽出
 func getIDFromURI(uri string) string {

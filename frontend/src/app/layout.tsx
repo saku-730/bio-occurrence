@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import AuthGuard from "@/components/AuthGuard";
+import Header from "@/components/Header"; // ★追加
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -26,11 +27,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50`}>
         <AuthProvider>
-          {/* ★AuthGuardでchildrenを包む！ */}
           <AuthGuard>
-            {children}
+            {/* ★ヘッダーを追加！フレックスボックスでレイアウトを整えるのだ */}
+            <div className="min-h-screen flex flex-col">
+              <Header />
+              <div className="flex-1">
+                {children}
+              </div>
+            </div>
           </AuthGuard>
         </AuthProvider>
       </body>

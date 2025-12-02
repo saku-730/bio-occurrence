@@ -9,6 +9,7 @@ type ListItem = {
   id: string;
   taxon_label: string;
   remarks: string;
+  owner_name?: string;
 };
 
 export default function OccurrenceList() {
@@ -105,6 +106,13 @@ export default function OccurrenceList() {
                   <h2 className="relative z-10 text-xl font-bold text-blue-700 mb-2 pointer-events-none">
                     {item.taxon_label}
                   </h2>
+		  {item.owner_name && (
+		    <div className="relative z-10 text-xs text-gray-500 mb-2 flex items-center gap-1">
+		      <span className="bg-gray-100 px-2 py-0.5 rounded text-gray-600">
+			by {item.owner_name}
+		      </span>
+		    </div>
+		  )}
                   <p className="relative z-10 text-gray-600 text-sm line-clamp-2 pointer-events-none min-h-[1.25rem]">
                     {item.remarks || "（メモなし）"}
                   </p>

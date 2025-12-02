@@ -4,14 +4,14 @@ import { useState, useEffect } from "react";
 import OntologySearch, { SearchResult } from "./OntologySearch";
 import { Trash2, Send, Save } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth } from "@/contexts/AuthContext"; // ★追加: AuthContextを使う
 
-// 編集モード用のProps定義
+// Props定義 (そのまま)
 type Props = {
-  id?: string; // 更新対象のID (なければ新規登録)
+  id?: string;
   initialData?: {
     taxon_label: string;
-    taxon_id: string; // 今は固定だけど将来用
+    taxon_id: string;
     remarks: string;
     traits: SearchResult[];
   };
@@ -19,10 +19,11 @@ type Props = {
 
 export default function OccurrenceForm({ id, initialData }: Props) {
   const router = useRouter();
-  const { token } = useAuth();
+  const { token } = useAuth(); // ★追加: トークンを取り出す
 
-  const [taxonLabel, setTaxonLabel] = useState(initialData?.taxon_label);
-  const [taxonID, setTaxonID] = useState(initialData?.taxon_id);
+  // 初期値 (input undefinedエラー対策済み)
+  const [taxonLabel, setTaxonLabel] = useState(initialData?.taxon_label || "タヌキ");
+  const [taxonID, setTaxonID] = useState(initialData?.taxon_id || "ncbi:34844");
   const [traits, setTraits] = useState<SearchResult[]>(initialData?.traits || []);
   const [remarks, setRemarks] = useState(initialData?.remarks || "");
   
@@ -41,8 +42,9 @@ export default function OccurrenceForm({ id, initialData }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // ★追加: ログインチェック
     if (!token) {
-      alert("データを登録するにはログインが必要");
+      alert("データを登録するにはログインが必要なのだ！");
       router.push("/login");
       return;
     }
@@ -57,27 +59,32 @@ export default function OccurrenceForm({ id, initialData }: Props) {
     };
 
     try {
-      const url = id ? `...` : `...`;
+      const url = id 
+        ? `http://localhost:8080/api/occurrences/${id}`
+        : "http://localhost:8080/api/occurrences";
+      
       const method = id ? "PUT" : "POST";
 
       const res = await fetch(url, {
         method: method,
         headers: { 
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
+            "Authorization": `Bearer ${token}` // ★追加: ここが一番大事！
         },
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) throw new Error("送信エラー");
+      if (!res.ok) {
+        // エラーの詳細をログに出す
+        console.error("Server Error:", res.status, await res.text());
+        throw new Error("送信エラー");
+      }
 
       setStatus("success");
       
-      // 更新の場合は一覧に戻るなどの処理
       if (id) {
         setTimeout(() => router.push(`/occurrences/detail?id=${id}`), 1000);
       } else {
-        // 新規の場合はフォームをクリア
         setRemarks("");
         setTraits([]);
       }
@@ -90,22 +97,21 @@ export default function OccurrenceForm({ id, initialData }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6 bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-2xl mx-auto">
-      {/* ... (入力フィールド部分は変更なしなので省略) ... */}
+      {/* ... (入力フォームの中身は変更なし) ... */}
       
-      {/* 1. 生物名 */}
       <div>
         <label className="block text-sm font-bold text-gray-700 mb-1">生物名 (Taxon)</label>
         <div className="flex gap-2">
           <input
             type="text"
-            value={taxonLabel}
+            value={taxonLabel || ""}
             onChange={(e) => setTaxonLabel(e.target.value)}
             className="flex-1 p-2 border border-gray-300 rounded text-black"
             required
           />
           <input
             type="text"
-            value={taxonID}
+            value={taxonID || ""}
             onChange={(e) => setTaxonID(e.target.value)}
             className="w-32 p-2 border border-gray-300 rounded bg-gray-50 text-gray-600 text-sm font-mono"
             required
@@ -113,7 +119,6 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         </div>
       </div>
 
-      {/* 2. 形質 */}
       <div>
         <label className="block text-sm font-bold text-gray-700 mb-1">特徴・形質 (Traits)</label>
         <OntologySearch onSelect={addTrait} />
@@ -129,17 +134,15 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         </div>
       </div>
 
-      {/* 3. メモ */}
       <div>
         <label className="block text-sm font-bold text-gray-700 mb-1">メモ (Remarks)</label>
         <textarea
-          value={remarks}
+          value={remarks || ""}
           onChange={(e) => setRemarks(e.target.value)}
           className="w-full p-2 border border-gray-300 rounded h-24 text-black"
         />
       </div>
 
-      {/* ボタンの文言を変える */}
       <button
         type="submit"
         disabled={status === "submitting"}
@@ -152,12 +155,16 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         )}
       </button>
 
-      {/* ... (ステータス表示も同じ) ... */}
       {status === "success" && (
         <div className="p-3 bg-green-100 text-green-700 rounded text-center">
           ✅ {id ? "更新成功！詳細ページに戻るのだ..." : "登録成功！データベースに保存されたのだ！"}
         </div>
       )}
+      {status === "error" && (
+         <div className="p-3 bg-red-100 text-red-700 rounded text-center">
+           ❌ 送信エラーなのだ。ログイン切れかも？
+         </div>
+       )}
     </form>
   );
 }

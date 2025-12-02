@@ -29,12 +29,12 @@ func main() {
 
 	pgDB := infrastructure.NewPostgresDB(PGHost, PGPort, PGUser, PGPass, PGDB)
 	// 1. 依存関係の組み立て (DI)
-	userRepo := repository.NewUserRepository(pgDB)
-	repo := repository.NewOccurrenceRepository(fusekiURL, fusekiUser, fusekiPass)
+	occRepo := repository.NewOccurrenceRepository(fusekiURL, fusekiUser, fusekiPass)
 	searchRepo := repository.NewSearchRepository(meiliURL, meiliKey)
+	userRepo := repository.NewUserRepository(pgDB)
 
 	authSvc := service.NewAuthService(userRepo)
-	svc := service.NewOccurrenceService(repo, searchRepo)
+	svc := service.NewOccurrenceService(occRepo, searchRepo)
 
 	authHandler := handler.NewAuthHandler(authSvc)
 	h := handler.NewOccurrenceHandler(svc)

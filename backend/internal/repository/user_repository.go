@@ -9,6 +9,7 @@ import (
 type UserRepository interface {
 	Create(user *model.User) error
 	FindByEmail(email string) (*model.User, error)
+	FindByID(id string) (*model.User, error)
 }
 
 type userRepository struct {
@@ -44,6 +45,22 @@ func (r *userRepository) FindByEmail(email string) (*model.User, error) {
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil // 見つからない場合はnilを返す
+	}
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func (r *userRepository) FindByID(id string) (*model.User, error) {
+	user := &model.User{}
+	query := `SELECT id, username, email, password_hash, created_at, updated_at FROM users WHERE id = $1`
+	
+	err := r.db.QueryRow(query, id).Scan(
+		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
