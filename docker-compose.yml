@@ -8,7 +8,7 @@ services:
     ports:
       - "3030:3030"
     environment:
-      - ADMIN_PASSWORD=admin123
+      - ADMIN_PASSWORD=${FUSEKI_PASSWORD}
       # 【重要】起動時に 'biodb' というデータセットを TDB2形式で作る設定
       - FUSEKI_DATASET_1=biodb
       #- FUSEKI_HOME=/fuseki
@@ -33,9 +33,9 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=bio_user
-      - POSTGRES_PASSWORD=14afqrzv
-      - POSTGRES_DB=bio_auth
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     volumes:
       - ./docker_data/postgres:/var/lib/postgresql/data
     networks:
@@ -48,7 +48,7 @@ services:
     ports:
       - "7700:7700"
     environment:
-      - MEILI_MASTER_KEY=masterKey123
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
     volumes:
       - ./docker_data/meilisearch:/meili_data
     networks:
