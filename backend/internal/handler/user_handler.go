@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"github.com/saku-730/bio-occurrence/backend/internal/service"
+	"github.com/saku-730/bio-occurrence/backend/internal/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -51,8 +52,15 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	token, err := utils.GenerateToken(user.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "トークン生成失敗"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "ログイン成功なのだ！",
+		"message": "success login",
 		"user":    user,
+		"token":   token, 
 	})
 }

@@ -2,9 +2,10 @@ package router
 
 import (
 	"github.com/saku-730/bio-occurrence/backend/internal/handler"
+	"github.com/saku-730/bio-occurrence/backend/internal/middleware"
 	"time"
 
-	"github.com/gin-contrib/cors" // ★これを使っているか確認！
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -39,16 +40,20 @@ func SetupRouter(
 		auth.POST("/login", authHandler.Login)
 	}
 	// APIルート定義
+
 	api := r.Group("/api")
 	{
-		api.POST("/occurrences", occHandler.Create)
 		api.GET("/occurrences", occHandler.GetAll)
 		api.GET("/occurrences/:id", occHandler.GetDetail)
-		api.PUT("/occurrences/:id", occHandler.Update)
-		api.DELETE("/occurrences/:id", occHandler.Delete)
-
 		api.GET("/search", occHandler.Search)
-	}
 
+		authorized := api.Group("/")
+		authorized.Use(middleware.AuthRequired())
+		{
+			authorized.POST("/occurrences", occHandler.Create)
+			authorized.PUT("/occurrences/:id", occHandler.Update)
+			authorized.DELETE("/occurrences/:id", occHandler.Delete)
+		}
+	}
 	return r
 }

@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import OntologySearch, { SearchResult } from "./OntologySearch";
 import { Trash2, Send, Save } from "lucide-react";
-import { useRouter } from "next/navigation"; // 完了後の移動用
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 
 // 編集モード用のProps定義
 type Props = {
@@ -18,10 +19,10 @@ type Props = {
 
 export default function OccurrenceForm({ id, initialData }: Props) {
   const router = useRouter();
+  const { token } = useAuth();
 
-  // 初期値があればそれを使う
-  const [taxonLabel, setTaxonLabel] = useState(initialData?.taxon_label || "タヌキ");
-  const [taxonID, setTaxonID] = useState(initialData?.taxon_id || "ncbi:34844");
+  const [taxonLabel, setTaxonLabel] = useState(initialData?.taxon_label);
+  const [taxonID, setTaxonID] = useState(initialData?.taxon_id);
   const [traits, setTraits] = useState<SearchResult[]>(initialData?.traits || []);
   const [remarks, setRemarks] = useState(initialData?.remarks || "");
   
@@ -39,6 +40,13 @@ export default function OccurrenceForm({ id, initialData }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!token) {
+      alert("データを登録するにはログインが必要");
+      router.push("/login");
+      return;
+    }
+
     setStatus("submitting");
 
     const payload = {
@@ -49,16 +57,15 @@ export default function OccurrenceForm({ id, initialData }: Props) {
     };
 
     try {
-      // IDがあるなら PUT (更新)、なければ POST (新規)
-      const url = id 
-        ? `http://localhost:8080/api/occurrences/${id}`
-        : "http://localhost:8080/api/occurrences";
-      
+      const url = id ? `...` : `...`;
       const method = id ? "PUT" : "POST";
 
       const res = await fetch(url, {
         method: method,
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}` // ★追加: ここが重要！
+        },
         body: JSON.stringify(payload),
       });
 

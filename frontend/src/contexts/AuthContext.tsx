@@ -12,6 +12,7 @@ type User = {
 
 type AuthContextType = {
   user: User | null;
+  token: string | null;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string) => Promise<void>;
   logout: () => void;
@@ -22,18 +23,22 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
   // 起動時にlocalStorageからユーザー情報を復元する
   useEffect(() => {
     const savedUser = localStorage.getItem("bio_user");
+    const savedToken = localStorage.getItem("bio_token");
     if (savedUser) {
       try {
         setUser(JSON.parse(savedUser));
+	setToken(savedToken);
       } catch (e) {
         console.error("ユーザー情報の復元に失敗", e);
         localStorage.removeItem("bio_user");
+	localStorage.removeItem("bio_token");
       }
     }
     setIsLoading(false);
@@ -54,10 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const data = await res.json();
     const userData = data.user;
+    const tokenData = data.token;
 
     // 状態を更新して保存
     setUser(userData);
+    setToken(tokenData);
     localStorage.setItem("bio_user", JSON.stringify(userData));
+    localStorage.setItem("bio_token", tokenData);
+
     router.push("/"); // トップページへ
   };
 
@@ -82,12 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ログアウト処理
   const logout = () => {
     setUser(null);
+    setToken(null);
     localStorage.removeItem("bio_user");
+    localStorage.removeItem("bio_token");
     router.push("/login");
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, token, login, register, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );
