@@ -15,6 +15,7 @@ type DetailData = {
   taxon_label: string;
   remarks: string;
   traits: Trait[];
+  owner_name?: string;
 };
 
 // 中身のコンポーネント（データ取得ロジック）
@@ -92,6 +93,9 @@ function DetailContent() {
       <h1 className="text-4xl font-bold text-gray-900 mb-2">
         {data.taxon_label}
       </h1>
+      <div className="text-sm text-gray-600 mb-1">
+	  登録者: <span className="font-bold">{data.owner_name || "不明"}</span>
+      </div>
       <div className="text-xs text-gray-400 font-mono mb-8 break-all">
         URI: {data.id}
       </div>

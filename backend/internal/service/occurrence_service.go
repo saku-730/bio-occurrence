@@ -69,12 +69,46 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 }
 
 func (s *occurrenceService) GetAll() ([]model.OccurrenceListItem, error) {
-	return s.repo.FindAll()
+	list, err := s.repo.FindAll()
+	if err != nil {
+		return nil, err
+	}
+
+	// N+1問題になるけど、今はシンプルにループでユーザー名を取得するのだ
+	for i, item := range list {
+		if item.OwnerID != "" {
+			user, err := s.userRepo.FindByID(item.OwnerID)
+			if err == nil && user != nil {
+				list[i].OwnerName = user.Username
+			} else {
+				list[i].OwnerName = "Unknown"
+			}
+		}
+	}
+	return list, nil
 }
 
 func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error) {
 	targetURI := "http://my-db.org/occ/" + id
-	return s.repo.FindByID(targetURI)
+	detail, err := s.repo.FindByID(targetURI)
+	if err != nil {
+		return nil, err
+	}
+	if detail == nil {
+		return nil, nil
+	}
+
+	// ユーザー名を取得
+	if detail.OwnerID != "" {
+		user, err := s.userRepo.FindByID(detail.OwnerID)
+		if err == nil && user != nil {
+			detail.OwnerName = user.Username
+		} else {
+			detail.OwnerName = "Unknown"
+		}
+	}
+
+	return detail, nil
 }
 
 func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {

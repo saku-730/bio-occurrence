@@ -59,11 +59,14 @@ func (r *occurrenceRepository) Create(uri string,userID string, req model.Occurr
 func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
 	query := `
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
-		SELECT ?id ?taxonName ?remarks
+		PREFIX dcterms: <http://purl.org/dc/terms/>
+		
+		SELECT ?id ?taxonName ?remarks ?creator
 		WHERE {
 			?id a dwc:Occurrence ;
 				dwc:scientificName ?taxonName .
 			OPTIONAL { ?id dwc:occurrenceRemarks ?remarks }
+			OPTIONAL { ?id dcterms:creator ?creator }
 		}
 		LIMIT 100
 	`
@@ -74,45 +77,66 @@ func (r *occurrenceRepository) FindAll() ([]model.OccurrenceListItem, error) {
 
 	var list []model.OccurrenceListItem
 	for _, b := range results {
+		// URI (http://my-db.org/user/UUID) から UUID だけ抜く
+		creatorURI := safeValue(b, "creator")
+		ownerID := ""
+		if creatorURI != "" {
+			parts := strings.Split(creatorURI, "/")
+			ownerID = parts[len(parts)-1]
+		}
+
 		list = append(list, model.OccurrenceListItem{
 			ID:        b["id"].Value,
 			TaxonName: b["taxonName"].Value,
 			Remarks:   safeValue(b, "remarks"),
+			OwnerID:   ownerID, // ★セット
+			// OwnerName はここでは分からないので Service層で埋める
 		})
 	}
 	return list, nil
 }
 
+// FindByID の修正
 func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, error) {
 	query := fmt.Sprintf(`
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
 		PREFIX ro: <http://purl.obolibrary.org/obo/RO_>
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		PREFIX dcterms: <http://purl.org/dc/terms/>
 
-		SELECT ?taxonName ?remarks ?traitID ?traitLabel
+		SELECT ?taxonName ?remarks ?traitID ?traitLabel ?creator
 		WHERE {
 			<%s> dwc:scientificName ?taxonName .
 			OPTIONAL { <%s> dwc:occurrenceRemarks ?remarks }
+			OPTIONAL { <%s> dcterms:creator ?creator }
 			OPTIONAL {
 				<%s> ro:0000053 ?traitID .
 				OPTIONAL { ?traitID rdfs:label ?traitLabel }
 			}
 		}
-	`, uri, uri, uri)
+	`, uri, uri, uri, uri)
 
 	results, err := r.sendQuery(query)
 	if err != nil {
 		return nil, err
 	}
 	if len(results) == 0 {
-		return nil, nil // Not Found
+		return nil, nil
 	}
 
-	// データ整形
+	// Creator IDの抽出
+	creatorURI := safeValue(results[0], "creator")
+	ownerID := ""
+	if creatorURI != "" {
+		parts := strings.Split(creatorURI, "/")
+		ownerID = parts[len(parts)-1]
+	}
+
 	detail := &model.OccurrenceDetail{
 		ID:        uri,
 		TaxonName: results[0]["taxonName"].Value,
 		Remarks:   safeValue(results[0], "remarks"),
+		OwnerID:   ownerID, // ★セット
 		Traits:    []model.Trait{},
 	}
 
@@ -128,6 +152,7 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 			}
 		}
 	}
+
 	return detail, nil
 }
 

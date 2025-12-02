@@ -14,11 +14,12 @@ type Trait struct {
 	Label string `json:"label" binding:"required"`
 }
 
-// 一覧取得時のレスポンス
 type OccurrenceListItem struct {
 	ID        string `json:"id"`
 	TaxonName string `json:"taxon_label"`
 	Remarks   string `json:"remarks"`
+	OwnerID   string `json:"owner_id"`
+	OwnerName string `json:"owner_name"`
 }
 
 // 詳細取得時のレスポンス
@@ -27,6 +28,8 @@ type OccurrenceDetail struct {
 	TaxonName string  `json:"taxon_label"`
 	Remarks   string  `json:"remarks"`
 	Traits    []Trait `json:"traits"`
+	OwnerID   string  `json:"owner_id"`
+	OwnerName string  `json:"owner_name"`
 }
 
 // 種ごとの集計データのレスポンス
