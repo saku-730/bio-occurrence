@@ -64,7 +64,7 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         method: method,
         headers: { 
             "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}` // ★追加: ここが重要！
+            "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify(payload),
       });
