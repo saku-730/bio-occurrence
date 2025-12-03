@@ -60,23 +60,20 @@ func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri stri
 		TaxonID:    req.TaxonID,
 		TaxonLabel: req.TaxonLabel,
 		Remarks:    req.Remarks,
-		Traits:     make([]string, 0, len(req.Traits)*2), // 容量確保
+		Traits:     make([]string, 0, len(req.Traits)*3), // 少し多めに確保
 		OwnerID:    ownerID,
 		OwnerName:  ownerName,
 		IsPublic:   req.IsPublic,
 	}
 	
 	for _, t := range req.Traits {
-		// 1. 値だけで検索できるようにする ("昆虫")
+		// 検索しやすいように色々なパターンで文字列化して入れる
 		doc.Traits = append(doc.Traits, t.ValueLabel)
-		// 2. 述語も検索できるようにする ("食べる")
 		doc.Traits = append(doc.Traits, t.PredicateLabel)
-        // 3. 組み合わせでも検索できるようにする ("食べる: 昆虫")
-        doc.Traits = append(doc.Traits, fmt.Sprintf("%s: %s", t.PredicateLabel, t.ValueLabel))
+		doc.Traits = append(doc.Traits, fmt.Sprintf("%s: %s", t.PredicateLabel, t.ValueLabel))
 	}
 
 	_, err := r.client.Index(r.indexName).AddDocuments([]OccurrenceDocument{doc}, nil)
-
 	if err != nil {
 		return fmt.Errorf("meilisearch indexing failed: %w", err)
 	}

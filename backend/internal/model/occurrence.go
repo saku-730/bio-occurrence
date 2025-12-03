@@ -9,14 +9,15 @@ type OccurrenceRequest struct {
 	IsPublic   bool    `json:"is_public"`
 }
 
+// 形質データ (トリプル構造)
 type Trait struct {
-	// 述語 (Predicate / Relationship)
-	PredicateID    string `json:"predicate_id"`    // オントロジーID (例: ro:0002470) 。なければ空文字。
-	PredicateLabel string `json:"predicate_label"` // 表示名 (例: 食べる)。必須。
+	// 述語 (Predicate)
+	PredicateID    string `json:"predicate_id"`
+	PredicateLabel string `json:"predicate_label"`
 
 	// 値 (Object / Value)
-	ValueID    string `json:"value_id"`    // オントロジーID (例: ncbi:50557) 。なければ空文字。
-	ValueLabel string `json:"value_label"` // 表示名 (例: 昆虫)。必須。
+	ValueID    string `json:"value_id"`
+	ValueLabel string `json:"value_label"`
 }
 
 type OccurrenceListItem struct {
@@ -25,9 +26,9 @@ type OccurrenceListItem struct {
 	Remarks   string `json:"remarks"`
 	OwnerID   string `json:"owner_id"`
 	OwnerName string `json:"owner_name"`
+	CreatedAt string `json:"created_at"`
 }
 
-// 詳細取得時のレスポンス
 type OccurrenceDetail struct {
 	ID        string  `json:"id"`
 	TaxonName string  `json:"taxon_label"`
@@ -35,11 +36,11 @@ type OccurrenceDetail struct {
 	Traits    []Trait `json:"traits"`
 	OwnerID   string  `json:"owner_id"`
 	OwnerName string  `json:"owner_name"`
+	CreatedAt string `json:"created_at"`
 }
 
-// 種ごとの集計データのレスポンス
 type TaxonStats struct {
 	TaxonID    string   `json:"taxon_id"`
 	TotalCount string   `json:"total_count"`
-	Traits     []string `json:"traits"` // 簡易表示用に文字列リストのまま
+	Traits     []string `json:"traits"`
 }

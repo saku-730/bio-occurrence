@@ -2,12 +2,14 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Loader2, ArrowLeft, Tag, Pencil, Trash2 } from "lucide-react";
+import { Loader2, ArrowLeft, ArrowRight, Tag, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext"; // ★追加: AuthContextを使う
 
 type Trait = {
-  id: string;
-  label: string;
+  predicate_id: string;
+  predicate_label: string;
+  value_id: string;
+  value_label: string;
 };
 
 type DetailData = {
@@ -16,7 +18,9 @@ type DetailData = {
   remarks: string;
   traits: Trait[];
   owner_name?: string;
+  created_at?: string;
 };
+
 
 function DetailContent() {
   const searchParams = useSearchParams();
@@ -78,7 +82,7 @@ function DetailContent() {
 
   if (!id) return <div className="p-10 text-center">IDが指定されていません</div>;
   if (loading) return <div className="p-10 flex justify-center"><Loader2 className="animate-spin" /></div>;
-  if (!data) return <div className="p-10 text-center">データが見つからないのだ...</div>;
+  if (!data) return <div className="p-10 text-center">データが見つからない</div>;
 
   return (
     <div className="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-lg border border-gray-100">
@@ -109,6 +113,11 @@ function DetailContent() {
       
       <div className="text-sm text-gray-600 mb-1">
         登録者: <span className="font-bold">{data.owner_name || "不明"}</span>
+      {data.created_at && (
+	<div>
+	 登録日: <span className="font-mono">{new Date(data.created_at).toLocaleString()}</span>
+	</div>
+      )}
       </div>
 
       <div className="text-xs text-gray-400 font-mono mb-8 break-all">
@@ -116,19 +125,20 @@ function DetailContent() {
       </div>
 
       <div className="mb-8">
-        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">特徴・形質</h2>
+        <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-3">特徴・形質・関係性</h2>
         <div className="flex flex-wrap gap-2">
-          {data.traits.length > 0 ? (
-            data.traits.map((t) => (
-              <span key={t.id} className="inline-flex items-center px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
-                <Tag className="h-3 w-3 mr-1" />
-                {t.label}
+          {data.traits && data.traits.length > 0 ? (
+            data.traits.map((t, i) => (
+              <span key={i} className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 border border-gray-200 text-gray-800 rounded-md text-sm">
+                <span className="font-bold text-blue-600">{t.predicate_label || "性質"}</span>
+                <ArrowRight className="h-3 w-3 text-gray-400" />
+                <span>{t.value_label}</span>
               </span>
             ))
           ) : (
             <span className="text-gray-400">登録された特徴はありません</span>
           )}
-        </div>
+	</div>
       </div>
 
       <div className="bg-gray-50 p-6 rounded-lg border border-gray-100">

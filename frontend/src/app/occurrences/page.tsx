@@ -12,6 +12,7 @@ type ListItem = {
   remarks: string;
   owner_name?: string;
   owner_id?: string;
+  created_at?: string;
 };
 
 export default function OccurrenceList() {
@@ -51,6 +52,16 @@ export default function OccurrenceList() {
     }
   };
 
+  const formatDate = (dateStr?: string) => {
+   if (!dateStr) return "";
+   return new Date(dateStr).toLocaleDateString("ja-JP", {
+	year: "numeric",
+	month: "short",
+	day: "numeric",
+	hour: "2-digit",
+	minute: "2-digit",
+    });
+  };
   useEffect(() => {
     fetchData(searchQuery);
   }, [token]);
@@ -124,6 +135,7 @@ export default function OccurrenceList() {
                     <th scope="col" className="px-6 py-3 font-bold w-24">ID (UUID)</th>
                     <th scope="col" className="px-6 py-3 font-bold">生物名 (Taxon)</th>
                     <th scope="col" className="px-6 py-3 font-bold">登録者</th>
+		    <th scope="col" className="px-6 py-3 font-bold">登録日</th>
                     <th scope="col" className="px-6 py-3 font-bold">メモ</th>
                   </tr>
                 </thead>
@@ -172,6 +184,10 @@ export default function OccurrenceList() {
                             <span className="text-gray-300">-</span>
                           )}
                         </td>
+
+			<td className="px-6 py-4 text-xs text-gray-500 whitespace-nowrap">
+			  {formatDate(item.created_at)}
+			</td>
 
                         <td className="px-6 py-4 max-w-xs truncate" title={item.remarks}>
                           {item.remarks || <span className="text-gray-300">-</span>}
