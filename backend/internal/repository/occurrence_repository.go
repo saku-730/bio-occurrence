@@ -239,6 +239,16 @@ INSERT DATA {
   {{end}}
 }
 `
+	taxonID := req.TaxonID
+	if taxonID == "" {
+		taxonID = "ncbi:unknown" // 未同定用の仮ID
+	}
+
+	taxonLabel := req.TaxonLabel
+	    if taxonLabel == "" {
+		taxonLabel = "未同定" // ラベルがない場合の表示
+	}
+
 	type TraitSafe struct {
 		IDSafe, Label string
 	}
@@ -248,8 +258,8 @@ INSERT DATA {
 		Traits                                                    []TraitSafe
 	}{
 		URI:         uri,
-		TaxonIDSafe: strings.ReplaceAll(req.TaxonID, ":", "_"),
-		TaxonLabel:  req.TaxonLabel,
+		TaxonIDSafe: strings.ReplaceAll(taxonID, ":", "_"),
+		TaxonLabel:  taxonLabel,
 		Remarks:     req.Remarks,
 		UserID:      userID,
 		Visibility:  visibility,

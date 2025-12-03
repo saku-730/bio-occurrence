@@ -102,22 +102,27 @@ export default function OccurrenceForm({ id, initialData }: Props) {
     <form onSubmit={handleSubmit} className="space-y-6 bg-white p-6 rounded-xl shadow-lg border border-gray-100 max-w-2xl mx-auto">
       {/* ... (入力フォームの中身は変更なし) ... */}
       
+      
       <div>
-        <label className="block text-sm font-bold text-gray-700 mb-1">生物名 (Taxon)</label>
+        <label className="block text-sm font-bold text-gray-700 mb-1">
+          生物名 (Taxon) <span className="text-xs font-normal text-gray-500">※同定限界</span>
+        </label>
         <div className="flex gap-2">
           <input
             type="text"
             value={taxonLabel || ""}
             onChange={(e) => setTaxonLabel(e.target.value)}
             className="flex-1 p-2 border border-gray-300 rounded text-black"
-            required
+            placeholder="例: Eisenia fetida (空欄なら未同定になります)"
+            // required を削除！
           />
           <input
             type="text"
             value={taxonID || ""}
             onChange={(e) => setTaxonID(e.target.value)}
             className="w-32 p-2 border border-gray-300 rounded bg-gray-50 text-gray-600 text-sm font-mono"
-            required
+            placeholder="ID"
+            // required を削除！
           />
         </div>
       </div>
