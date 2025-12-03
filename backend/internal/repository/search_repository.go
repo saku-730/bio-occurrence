@@ -22,9 +22,9 @@ type OccurrenceDocument struct {
 }
 
 type SearchRepository interface {
-	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
+	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string, ancestors []string) error
 	DeleteOccurrence(id string) error
-	Search(query string, currentUserID string, taxonIDs []string) ([]OccurrenceDocument, error)
+	Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error)
 }
 
 type searchRepository struct {
@@ -66,6 +66,7 @@ func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri stri
 		OwnerID:    ownerID,
 		OwnerName:  ownerName,
 		IsPublic:   req.IsPublic,
+		Ancestors:  ancestors,
 	}
 	
 	for _, t := range req.Traits {
@@ -96,24 +97,24 @@ func (r *searchRepository) Search(query string, currentUserID string, taxonIDs [
 		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
 	}
 
-	if len(taxonIDs) > 0 {
-		// IDリストを "ncbi:1, ncbi:2, ..." という文字列に変換
-		// 注意: 文字列IDなので、シングルクォートで囲む必要がある
-		quotedIDs := make([]string, len(taxonIDs))
-		for i, id := range taxonIDs {
-			quotedIDs[i] = fmt.Sprintf("'%s'", id)
-		}
-		
-		// "taxon_id IN ['ncbi:1', 'ncbi:2']" というフィルタを作る
-		taxonFilter := fmt.Sprintf("taxon_id IN [%s]", strings.Join(quotedIDs, ", "))
-		
-		// 既存フィルタと合体
+	if targetTaxonID != "" {
+		// 「このデータの祖先リストの中に、指定されたIDが含まれているか？」
+		// ancestors = 'ncbi:123' というフィルタで、配列内の要素との一致判定ができる
+		taxonFilter := fmt.Sprintf("ancestors = '%s'", targetTaxonID)
 		filter = fmt.Sprintf("(%s) AND (%s)", filter, taxonFilter)
 		
-		// ★重要: 推論が効いた場合は、キーワード検索を無効化（空文字）して、フィルタ結果を全表示する
-		// こうしないと「脊椎動物」という文字が入っていないデータが消えてしまう
-		query = ""
+		// 分類で絞り込んだ場合は、キーワード検索を空にする（全件表示）
+		// ただし、キーワードが入力されている場合はAND検索にする
+		// (今回は簡易的に、分類指定があればキーワードは無視する仕様にする)
+		if query == "" { // queryが空でなければキーワードも活かす
+        } else {
+            // キーワード検索も併用したい場合はそのままでいいが、
+            // "Vertebrata" というキーワード自体はヒットしないので空にするのが無難
+            // query = "" 
+        }
 	}
+
+
 
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
 		Limit:  50,

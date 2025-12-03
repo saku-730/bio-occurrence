@@ -23,6 +23,7 @@ type OccurrenceRepository interface {
 	GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error)
 	GetDescendantIDs(label string) ([]string, error)
 	GetAncestorIDs(taxonID string) ([]string, error)
+	GetTaxonIDByLabel(label string) (string, error)
 }
 
 type occurrenceRepository struct {
@@ -243,31 +244,39 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 }
 
 func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) {
-    // IDの形式を変換 (ncbi:123 -> http://.../NCBITaxon_123)
-    taxonURI := resolveURI(taxonID, "", "user_taxon") 
+    // ncbi:123 -> http://.../NCBITaxon_123
+    uri := "http://purl.obolibrary.org/obo/" + strings.ReplaceAll(taxonID, ":", "_")
+    
+	query := fmt.Sprintf(`
+		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		SELECT ?ancestor
+		WHERE {
+		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+            # 自分自身も含めて、親を再帰的にたどる (subClassOf*)
+			<%s> rdfs:subClassOf* ?ancestor .
+		  }
+		}
+	`, uri)
 
-    // rdfs:subClassOf* で親を辿る（*なので自分自身も含まれる）
-    query := fmt.Sprintf(`
-        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-        SELECT DISTINCT ?ancestor
-        WHERE {
-          GRAPH <http://my-db.org/ontology/ncbitaxon> {
-            <%s> rdfs:subClassOf* ?ancestor .
-          }
-        }
-    `, taxonURI)
+	results, err := r.sendQuery(query)
+    // ... (結果を []string "ncbi:..." に変換して返す)
+}
 
-    results, err := r.sendQuery(query)
-    if err != nil {
-        return nil, err
-    }
+func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
+	query := fmt.Sprintf(`
+		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		SELECT ?uri
+		WHERE {
+		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+			?uri rdfs:label ?label .
+			FILTER (lcase(str(?label)) = lcase("%s"))
+		  }
+		}
+		LIMIT 1
+	`, label)
 
-    var ids []string
-    for _, b := range results {
-        // URIからID部分を抽出してリストにする (shortenIDの実装による)
-        ids = append(ids, shortenID(b["ancestor"].Value))
-    }
-    return ids, nil
+	results, err := r.sendQuery(query)
+    // ... (結果があれば "ncbi:..." に変換して返す、なければ空文字)
 }
 
 // ---------------------------------------------------

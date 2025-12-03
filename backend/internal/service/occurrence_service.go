@@ -115,6 +115,34 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 	return detail, nil
 }
 
+func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
+	targetTaxonID := ""
+
+	// クエリが空でない場合、それが「分類名」かどうかを確認する
+	if query != "" {
+        // GetTaxonIDByName みたいなメソッドをRepoに追加して呼ぶのが綺麗だけど、
+        // 既存の GetDescendantIDs のロジックを少し変えて「IDだけ返す」メソッドを作ると良い
+        
+        // 今回は簡易的に、Repoに新メソッドを追加せず、既存の GetDescendantIDs を流用するハックでいくなら:
+        // しかし、GetDescendantIDsは「子孫全部」を返すので重い。
+        // 「名前からID1つだけ」を返すメソッドをRepoに追加するのが正解なのだ。
+        
+        // ★Repositoryに GetTaxonIDByLabel を追加したと仮定する
+		id, err := s.repo.GetTaxonIDByLabel(query)
+		if err == nil && id != "" {
+			targetTaxonID = id
+            // IDが見つかったら、クエリ文字列は空にしてフィルタリング検索に切り替える
+            // (そうしないと "Vertebrata" という文字を持たないデータがヒットしないため)
+            query = ""
+            fmt.Printf("🧠 推論検索: %s -> %s の子孫を検索します\n", query, targetTaxonID)
+		}
+	}
+
+	// 検索実行
+	return s.searchRepo.Search(query, userID, targetTaxonID)
+}
+
+
 func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
 	targetURI := "http://my-db.org/occ/" + id
 
@@ -139,8 +167,19 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 	if err := s.repo.Update(targetURI, userID, req); err != nil {
 		return err
 	}
+
+	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
+	if err != nil {
+		// エラーなら自分自身だけ入れる
+		ancestors = []string{req.TaxonID}
+	}
+
+	if err := s.repo.Update(targetURI, userID, req); err != nil {
+		return err
+	}
 	
-	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username)
+	// 引数を追加
+	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username, ancestors)
 }
 
 func (s *occurrenceService) Remove(userID string, id string) error {
@@ -173,15 +212,3 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
 
-func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
-    // 検索ワードが「分類名」だった場合、そのIDを特定する（これは既存のGetDescendantIDsの一部ロジックを流用できる）
-    // 例えば "Vertebrata" -> "ncbi:7742" を特定するだけ。子孫展開はしない。
-    
-    targetTaxonID := ""
-    // ... (名前からIDを引くロジック) ...
-
-    // 検索実行
-    // 今までの `taxon_id IN [...]` ではなく、
-    // `ancestors = "ncbi:7742"` というフィルタだけで、その子孫すべてのデータがヒットするのだ！
-    return s.searchRepo.Search(query, userID, targetTaxonID)
-}
