@@ -5,6 +5,7 @@ import OntologySearch, { SearchResult, TraitItem } from "./OntologySearch"; // �
 import { Trash2, Send, Save, ArrowRight } from "lucide-react"; // ★修正: ArrowRightを追加
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import TaxonSearch, { TaxonResult } from "./TaxonSearch";
 
 // Props定義
 type Props = {
@@ -45,6 +46,15 @@ export default function OccurrenceForm({ id, initialData }: Props) {
 
   const removeTrait = (index: number) => {
     setTraits(traits.filter((_, i) => i !== index));
+  };
+
+  const handleTaxonSelect = (item: TaxonResult | null) => {
+    if (item) {
+      setTaxonLabel(item.label);
+      setTaxonID(item.id.replace("_", ":")); // "NCBITaxon:34844" の形にしておくのが無難
+    } else {
+      setTaxonID(""); 
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -116,22 +126,23 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         <label className="block text-sm font-bold text-gray-700 mb-1">
           生物名 (Taxon) <span className="text-xs font-normal text-gray-500">※同定限界</span>
         </label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={taxonLabel || ""}
-            onChange={(e) => setTaxonLabel(e.target.value)}
-            className="flex-1 p-2 border border-gray-300 rounded text-black"
-            placeholder="例: Eisenia fetida (空欄なら未同定になります)"
-          />
-          <input
-            type="text"
-            value={taxonID || ""}
-            onChange={(e) => setTaxonID(e.target.value)}
-            className="w-32 p-2 border border-gray-300 rounded bg-gray-50 text-gray-600 text-sm font-mono"
-            placeholder="ID"
-          />
-        </div>
+
+	<TaxonSearch 
+	initialValue={taxonLabel} 
+	onSelect={handleTaxonSelect} 
+	/>
+
+	{/* ID確認用（デバッグ用に見せてもいいし、hiddenにしてもいい） */}
+	<div className="mt-1 text-xs text-gray-400 font-mono">
+	ID: <input 
+	  type="text" 
+	  value={taxonID} 
+	  readOnly
+	  onChange={(e) => setTaxonID(e.target.value)} 
+	  className="bg-transparent border-b border-gray-300 focus:outline-none w-40"
+	  placeholder="自動入力されます"
+	/>
+	</div>
       </div>
 
       {/* 2. 特徴・形質 (トリプル入力) */}
