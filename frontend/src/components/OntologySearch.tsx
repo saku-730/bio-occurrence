@@ -2,37 +2,55 @@
 
 import { useState } from "react";
 import { meiliClient, INDEX_ONTOLOGY } from "@/lib/meilisearch";
-import { Search, Loader2, Plus } from "lucide-react";
+import { Search, Loader2, Plus, ArrowRight } from "lucide-react";
 
-// 型定義をエクスポートしておく（他のファイルでも使うから）
+// 検索結果の型
 export type SearchResult = {
   id: string;
   label: string;
   en: string;
   uri: string;
+  ontology: string; // pato, ro, envo, etc.
 };
 
-// Propsの定義：親から関数をもらう
+// 親コンポーネントに渡すデータの型
+export type TraitItem = {
+  predicateID: string;
+  predicateLabel: string;
+  valueID: string;
+  valueLabel: string;
+};
+
 type Props = {
-  onSelect: (item: SearchResult) => void;
+  onAdd: (item: TraitItem) => void;
 };
 
-export default function OntologySearch({ onSelect }: Props) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResult[]>([]);
+export default function OntologySearch({ onAdd }: Props) {
+  // 述語 (Predicate) の状態
+  const [predQuery, setPredQuery] = useState("");
+  const [predID, setPredID] = useState(""); // 空なら独自入力扱い
+  const [predResults, setPredResults] = useState<SearchResult[]>([]);
+  
+  // 値 (Value) の状態
+  const [valQuery, setValQuery] = useState("");
+  const [valID, setValID] = useState(""); // 空なら独自入力扱い
+  const [valResults, setValResults] = useState<SearchResult[]>([]);
+
   const [loading, setLoading] = useState(false);
 
-  const handleSearch = async (text: string) => {
-    setQuery(text);
-    if (text.length === 0) {
+  // 検索実行 (汎用)
+  const search = async (text: string, setResults: (res: SearchResult[]) => void, filter?: string) => {
+    if (!text) {
       setResults([]);
       return;
     }
-
     setLoading(true);
     try {
-      const search = await meiliClient.index(INDEX_ONTOLOGY).search(text, { limit: 5 });
-      setResults(search.hits as SearchResult[]);
+      // Meilisearchで検索
+      // filterを使って、述語には RO(関係性) を、値には PATO/ENVO/NCBI を優先的に出すと親切だけど、
+      // 今回はシンプルに全検索するのだ。
+      const res = await meiliClient.index(INDEX_ONTOLOGY).search(text, { limit: 5, filter });
+      setResults(res.hits as SearchResult[]);
     } catch (error) {
       console.error(error);
     } finally {
@@ -40,44 +58,123 @@ export default function OntologySearch({ onSelect }: Props) {
     }
   };
 
-  const handleClick = (item: SearchResult) => {
-    onSelect(item); // 親に通知！
-    setQuery("");   // 入力欄をクリア
-    setResults([]); // リストを消す
+  // 述語の入力ハンドラ
+  const handlePredChange = (val: string) => {
+    setPredQuery(val);
+    setPredID(""); // 入力を変えたらIDはリセット（独自入力状態）
+    // RO (Relation Ontology) に絞って検索すると精度が良い
+    search(val, setPredResults); 
+  };
+
+  // 値の入力ハンドラ
+  const handleValChange = (val: string) => {
+    setValQuery(val);
+    setValID(""); // 入力を変えたらIDはリセット
+    search(val, setValResults);
+  };
+
+  // 候補選択ハンドラ
+  const selectPred = (item: SearchResult) => {
+    setPredQuery(item.label);
+    setPredID(item.id); // ID確定
+    setPredResults([]);
+  };
+
+  const selectVal = (item: SearchResult) => {
+    setValQuery(item.label);
+    setValID(item.id); // ID確定
+    setValResults([]);
+  };
+
+  // 追加ボタン
+  const handleAdd = () => {
+    if (!predQuery || !valQuery) return;
+
+    onAdd({
+      predicateID: predID,
+      predicateLabel: predQuery,
+      valueID: valID,
+      valueLabel: valQuery,
+    });
+
+    // クリア
+    setPredQuery("");
+    setPredID("");
+    setValQuery("");
+    setValID("");
   };
 
   return (
-    <div className="relative w-full">
-      <div className="relative">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => handleSearch(e.target.value)}
-          placeholder="形質を検索して追加 (例: 赤, red...)"
-          className="w-full p-2 pl-10 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 text-black"
-        />
-        <div className="absolute left-3 top-2.5 text-gray-400">
-          {loading ? <Loader2 className="animate-spin h-5 w-5" /> : <Search className="h-5 w-5" />}
+    <div className="flex flex-col gap-2 bg-gray-50 p-4 rounded-lg border border-gray-200">
+      <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">新しい特徴を追加</div>
+      
+      <div className="flex flex-col md:flex-row gap-2 items-start md:items-center">
+        
+        {/* 1. 述語 (Predicate) 入力 */}
+        <div className="relative flex-1 w-full">
+          <div className="relative">
+            <input
+              type="text"
+              value={predQuery}
+              onChange={(e) => handlePredChange(e.target.value)}
+              placeholder="項目 (例: 食性, 色...)"
+              className={`w-full p-2 pl-8 border rounded text-sm ${predID ? "bg-blue-50 border-blue-300 text-blue-900" : "border-gray-300 text-black"}`}
+            />
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+          </div>
+          {/* 候補リスト */}
+          {predResults.length > 0 && (
+            <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded shadow-lg mt-1 max-h-48 overflow-auto">
+              {predResults.map((item) => (
+                <li key={item.id} onClick={() => selectPred(item)} className="p-2 hover:bg-gray-100 cursor-pointer text-sm border-b text-black">
+                  <span className="font-bold">{item.label}</span> <span className="text-xs text-gray-500">({item.ontology})</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </div>
 
-      {results.length > 0 && (
-        <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded-md shadow-lg mt-1 max-h-60 overflow-auto">
-          {results.map((item) => (
-            <li
-              key={item.id}
-              onClick={() => handleClick(item)}
-              className="p-2 hover:bg-blue-50 cursor-pointer border-b flex justify-between items-center group text-black"
-            >
-              <div>
-                <div className="font-bold">{item.label}</div>
-                <div className="text-xs text-gray-500">{item.en}</div>
-              </div>
-              <Plus className="h-4 w-4 text-gray-400 group-hover:text-blue-500" />
-            </li>
-          ))}
-        </ul>
-      )}
+        <ArrowRight className="hidden md:block text-gray-400 h-4 w-4" />
+
+        {/* 2. 値 (Value) 入力 */}
+        <div className="relative flex-1 w-full">
+          <div className="relative">
+            <input
+              type="text"
+              value={valQuery}
+              onChange={(e) => handleValChange(e.target.value)}
+              placeholder="値 (例: 昆虫, 赤...)"
+              className={`w-full p-2 pl-8 border rounded text-sm ${valID ? "bg-green-50 border-green-300 text-green-900" : "border-gray-300 text-black"}`}
+            />
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+          </div>
+          {/* 候補リスト */}
+          {valResults.length > 0 && (
+            <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded shadow-lg mt-1 max-h-48 overflow-auto">
+              {valResults.map((item) => (
+                <li key={item.id} onClick={() => selectVal(item)} className="p-2 hover:bg-gray-100 cursor-pointer text-sm border-b text-black">
+                  <span className="font-bold">{item.label}</span> <span className="text-xs text-gray-500">({item.ontology})</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* 3. 追加ボタン */}
+        <button
+          type="button"
+          onClick={handleAdd}
+          disabled={!predQuery || !valQuery}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 whitespace-nowrap font-bold text-sm h-9"
+        >
+          <Plus className="h-4 w-4" /> 追加
+        </button>
+
+      </div>
+      
+      <div className="text-xs text-gray-400">
+        ※ 候補にない言葉もそのまま登録できるのだ（独自タグになる）。
+      </div>
     </div>
   );
 }
