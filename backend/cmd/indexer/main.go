@@ -18,6 +18,7 @@ const (
 	MeiliKey    = "masterKey123"
 	IndexName   = "ontology"
 	OboPurlBase = "http://purl.obolibrary.org/obo/"
+	BatchSize   = 2000 // ★2000件ごとに送信する設定
 )
 
 // TermDoc struct for Meilisearch
@@ -30,140 +31,151 @@ type TermDoc struct {
 	Ontology string   `json:"ontology"`
 }
 
-// OBO files to process
-var ontologies = []string{"pato.obo", "ro.obo", "envo.obo"}
+// ファイル名と登録先インデックスの対応表
+var ontologyConfig = map[string]string{
+	"pato.obo":      "ontology",
+	"ro.obo":        "ontology",
+	"envo.obo":      "ontology",
+	"ncbitaxon.obo": "classification",
+}
 
 func main() {
-	log.Println("🚀 Starting OBO Ontology Indexer")
+	log.Println("🚀 Starting Multi-Index OBO Indexer")
 
-	// 1. Initialize Meilisearch Client
 	client := meilisearch.New(MeiliURL, meilisearch.WithAPIKey(MeiliKey))
 
-	// 2. Run Indexing
-	if err := RunOboIndexer(client); err != nil {
+	if err := RunBatchIndexer(client); err != nil {
 		log.Fatalf("❌ Indexing failed: %v", err)
 	}
 
-	log.Println("✅ Indexing process completed successfully.")
+	log.Println("✅ All indexing processes completed successfully.")
 }
 
-// RunOboIndexer orchestrates the parsing and indexing process
-func RunOboIndexer(client meilisearch.ServiceManager) error {
-	// Configure Index
-	// ★修正点1: UpdateIndex には構造体を渡す必要があるのだ
-	_, err := client.Index(IndexName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
-		PrimaryKey: "id",
-	})
-	if err != nil {
-		// Index might not exist yet or already has this setting, just log info
-		log.Println("ℹ️  Index configuration check:", err)
+func RunBatchIndexer(client meilisearch.ServiceManager) error {
+	// インデックス設定
+	indices := []string{"ontology", "classification"}
+	for _, idxName := range indices {
+		client.Index(idxName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
+			PrimaryKey: "id",
+		})
+		filterAttributes := []string{"ontology", "label", "id"}
+		convertedAttributes := make([]interface{}, len(filterAttributes))
+		for i, v := range filterAttributes {
+			convertedAttributes[i] = v
+		}
+		client.Index(idxName).UpdateFilterableAttributes(&convertedAttributes)
+		log.Printf("⚙️  Configured index: %s", idxName)
 	}
 
-	allTerms := []TermDoc{}
-
-	for _, filename := range ontologies {
+	// ファイル処理
+	for filename, targetIndex := range ontologyConfig {
 		filePath := filepath.Join("data", "ontologies", filename)
-		log.Printf("📝 Parsing %s (OBO format)...", filename)
-
-		terms, err := parseOboFile(filePath)
-		if err != nil {
-			return fmt.Errorf("failed to parse %s: %w", filename, err)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			log.Printf("⚠️  File not found: %s (skipping)", filename)
+			continue
 		}
-		
-		log.Printf("   -> Extracted %d terms from %s.", len(terms), filename)
-		allTerms = append(allTerms, terms...)
-	}
 
-	log.Printf("📦 Preparing to submit %d documents...", len(allTerms))
-
-	if len(allTerms) > 0 {
-		// Send to Meilisearch
-		// ★修正点2: 第2引数に nil を追加したのだ
-		task, err := client.Index(IndexName).AddDocuments(allTerms, nil)
+		log.Printf("📝 Processing %s -> Index: [%s]", filename, targetIndex)
+		count, err := processFileInBatches(client, filePath, targetIndex)
 		if err != nil {
-			return fmt.Errorf("meilisearch submission error: %w", err)
+			return fmt.Errorf("failed to process %s: %w", filename, err)
 		}
-		log.Printf("🚀 Submitted! Task UID: %d", task.TaskUID)
-	} else {
-		log.Println("⚠️ No terms extracted. Check file paths and content.")
+		log.Printf("   -> Finished %s. Total indexed: %d terms.", filename, count)
 	}
 
 	return nil
 }
 
 // ---------------------------------------------------
-// OBO Parser Logic (Standard Library Only)
+// Streaming OBO Parser & Batch Sender
 // ---------------------------------------------------
 
-func parseOboFile(filePath string) ([]TermDoc, error) {
+func processFileInBatches(client meilisearch.ServiceManager, filePath, targetIndex string) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer file.Close()
 
-	var docs []TermDoc
-	var currentDoc *TermDoc
-
 	scanner := bufio.NewScanner(file)
-	
-	// Regex to extract synonym text: synonym: "TEXT" ...
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024) // 長い行に対応
+
+	var batch []TermDoc
+	var currentDoc *TermDoc
+	totalCount := 0
+
 	reSynonym := regexp.MustCompile(`^synonym: "([^"]+)"`)
+
+	// バッチ送信ヘルパー
+	sendBatch := func(docs []TermDoc) error {
+		if len(docs) == 0 {
+			return nil
+		}
+		_, err := client.Index(targetIndex).AddDocuments(docs, nil)
+		if err != nil {
+			return fmt.Errorf("meilisearch send error: %w", err)
+		}
+		return nil
+	}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// Start of a new Term block
-		if line == "[Term]" {
-			// Save previous doc if exists
+		// ★修正: [Term] だけでなく [Typedef] など全てのブロック開始を検知
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			// 直前のドキュメントがあれば確定してバッチに追加
 			if currentDoc != nil {
 				if currentDoc.Label == "" { currentDoc.Label = currentDoc.En }
-				if currentDoc.ID != "" { // Only save if ID exists
-					docs = append(docs, *currentDoc)
+				// IDがある有効なデータのみ追加
+				if currentDoc.ID != "" {
+					batch = append(batch, *currentDoc)
 				}
 			}
-			// Start new doc
-			currentDoc = &TermDoc{
-				Synonyms: []string{},
+
+			// バッチサイズを超えたら送信 (途中経過)
+			if len(batch) >= BatchSize {
+				if err := sendBatch(batch); err != nil {
+					return totalCount, err
+				}
+				totalCount += len(batch)
+				fmt.Printf("\r      ... Indexed %d terms", totalCount)
+				batch = []TermDoc{} // バッチクリア
+			}
+
+			// 新しいブロックの開始
+			if line == "[Term]" {
+				currentDoc = &TermDoc{Synonyms: []string{}}
+			} else {
+				// [Typedef] など不要なブロックの場合は nil にしてスキップ
+				currentDoc = nil
 			}
 			continue
 		}
 
-		// Skip if we are not inside a Term block
+		// currentDocがない（Termブロック外）なら読み飛ばす
 		if currentDoc == nil {
 			continue
 		}
 
-		// Parse attributes
+		// 属性のパース
 		if strings.HasPrefix(line, "id: ") {
-			// id: PATO:0000014
 			rawID := strings.TrimPrefix(line, "id: ")
-			
-			// OBO files often contain ID-spaces we don't need (like "is_a"), check for colon
-			if !strings.Contains(rawID, ":") { 
-				continue 
-			}
+			if !strings.Contains(rawID, ":") { continue }
 
-			// Normalize ID for Meilisearch (PATO:123 -> PATO_123)
 			safeID := strings.ReplaceAll(rawID, ":", "_")
-			
 			currentDoc.ID = safeID
 			currentDoc.Uri = OboPurlBase + safeID
 			
-			// Extract ontology name
 			parts := strings.Split(safeID, "_")
 			if len(parts) > 0 {
 				currentDoc.Ontology = parts[0]
 			}
-
 		} else if strings.HasPrefix(line, "name: ") {
-			// name: red
 			name := strings.TrimPrefix(line, "name: ")
 			currentDoc.Label = name
-			currentDoc.En = name // OBO is English by default
-
+			currentDoc.En = name
 		} else if strings.HasPrefix(line, "synonym: ") {
-			// synonym: "crimson" EXACT []
 			matches := reSynonym.FindStringSubmatch(line)
 			if len(matches) > 1 {
 				currentDoc.Synonyms = append(currentDoc.Synonyms, matches[1])
@@ -171,13 +183,24 @@ func parseOboFile(filePath string) ([]TermDoc, error) {
 		}
 	}
 
-	// Append the very last document
+	// ★重要: ループ終了後、最後の1件をバッチに追加
 	if currentDoc != nil {
 		if currentDoc.Label == "" { currentDoc.Label = currentDoc.En }
 		if currentDoc.ID != "" {
-			docs = append(docs, *currentDoc)
+			batch = append(batch, *currentDoc)
 		}
 	}
 
-	return docs, scanner.Err()
+	// ★重要: バッチに残っている端数（例: 3200件中の200件）を送信
+	if len(batch) > 0 {
+		if err := sendBatch(batch); err != nil {
+			return totalCount, err
+		}
+		totalCount += len(batch)
+		fmt.Printf("\r      ... Indexed %d terms (Final flush)\n", totalCount)
+	} else {
+		fmt.Println() // 改行のみ
+	}
+
+	return totalCount, scanner.Err()
 }

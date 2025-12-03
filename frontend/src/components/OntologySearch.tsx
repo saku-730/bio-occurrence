@@ -49,7 +49,7 @@ export default function OntologySearch({ onAdd }: Props) {
       // Meilisearchで検索
       // filterを使って、述語には RO(関係性) を、値には PATO/ENVO/NCBI を優先的に出すと親切だけど、
       // 今回はシンプルに全検索するのだ。
-      const res = await meiliClient.index(INDEX_ONTOLOGY).search(text, { limit: 5, filter });
+      const res = await meiliClient.index(INDEX_ONTOLOGY).search(text, { limit: 10, filter });
       setResults(res.hits as SearchResult[]);
     } catch (error) {
       console.error(error);
