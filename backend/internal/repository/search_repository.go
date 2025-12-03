@@ -4,7 +4,6 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/meilisearch/meilisearch-go"
 )
@@ -18,12 +17,14 @@ type OccurrenceDocument struct {
 	OwnerID    string   `json:"owner_id"`
 	OwnerName  string   `json:"owner_name"`
 	IsPublic   bool     `json:"is_public"`
-	Ancestors  []string `json:"ancestors"`
+	Ancestors  []string `json:"ancestors"` // ★追加
 }
 
 type SearchRepository interface {
+	// 引数に ancestors を追加
 	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string, ancestors []string) error
 	DeleteOccurrence(id string) error
+	// 引数に targetTaxonID を追加
 	Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error)
 }
 
@@ -36,8 +37,8 @@ func NewSearchRepository(url, key string) SearchRepository {
 	client := meilisearch.New(url, meilisearch.WithAPIKey(key))
 	indexName := "occurrences"
 
-	// ★フィルタ用属性に is_public, owner_id を追加
-	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id"}
+	// フィルタ用属性に ancestors を追加
+	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id", "ancestors"}
 	convertedAttributes := make([]interface{}, len(filterAttributes))
 	for i, v := range filterAttributes {
 		convertedAttributes[i] = v
@@ -45,7 +46,7 @@ func NewSearchRepository(url, key string) SearchRepository {
 
 	client.Index(indexName).UpdateFilterableAttributes(&convertedAttributes)
 	
-	// Primary Keyの設定も忘れずに
+	// Primary Keyの設定
 	client.Index(indexName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
 		PrimaryKey: "id",
 	})
@@ -56,21 +57,20 @@ func NewSearchRepository(url, key string) SearchRepository {
 	}
 }
 
-func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string, ownerID, ownerName string) error {
+func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string, ownerID, ownerName string, ancestors []string) error {
 	doc := OccurrenceDocument{
 		ID:         getIDFromURI(uri),
 		TaxonID:    req.TaxonID,
 		TaxonLabel: req.TaxonLabel,
 		Remarks:    req.Remarks,
-		Traits:     make([]string, 0, len(req.Traits)*3), // 少し多めに確保
+		Traits:     make([]string, 0, len(req.Traits)*3),
 		OwnerID:    ownerID,
 		OwnerName:  ownerName,
 		IsPublic:   req.IsPublic,
-		Ancestors:  ancestors,
+		Ancestors:  ancestors, // ★セット
 	}
 	
 	for _, t := range req.Traits {
-		// 検索しやすいように色々なパターンで文字列化して入れる
 		doc.Traits = append(doc.Traits, t.ValueLabel)
 		doc.Traits = append(doc.Traits, t.PredicateLabel)
 		doc.Traits = append(doc.Traits, fmt.Sprintf("%s: %s", t.PredicateLabel, t.ValueLabel))
@@ -89,32 +89,23 @@ func (r *searchRepository) DeleteOccurrence(uri string) error {
 	return err
 }
 
-
-func (r *searchRepository) Search(query string, currentUserID string, taxonIDs []string) ([]OccurrenceDocument, error) {
-	// 1. 権限フィルター (公開 or 自分)
+func (r *searchRepository) Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error) {
+	// フィルタリングロジック
 	filter := "is_public = true"
 	if currentUserID != "" {
 		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
 	}
 
+	// 祖先フィルター (分類検索)
 	if targetTaxonID != "" {
-		// 「このデータの祖先リストの中に、指定されたIDが含まれているか？」
-		// ancestors = 'ncbi:123' というフィルタで、配列内の要素との一致判定ができる
+		// ancestors配列の中に targetTaxonID が含まれているかチェック
+		// Meilisearchでは配列フィールドに対して = で「含まれるか」を判定できる
 		taxonFilter := fmt.Sprintf("ancestors = '%s'", targetTaxonID)
 		filter = fmt.Sprintf("(%s) AND (%s)", filter, taxonFilter)
 		
-		// 分類で絞り込んだ場合は、キーワード検索を空にする（全件表示）
-		// ただし、キーワードが入力されている場合はAND検索にする
-		// (今回は簡易的に、分類指定があればキーワードは無視する仕様にする)
-		if query == "" { // queryが空でなければキーワードも活かす
-        } else {
-            // キーワード検索も併用したい場合はそのままでいいが、
-            // "Vertebrata" というキーワード自体はヒットしないので空にするのが無難
-            // query = "" 
-        }
+		// 分類指定がある場合はキーワード検索はオプションにする（フィルタリングが主役）
+		// ただしqueryがあればAND条件になるのでそのまま渡してOK
 	}
-
-
 
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
 		Limit:  50,

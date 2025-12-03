@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"net/http"
+	"net/url"
 	"strings"
 	"text/template"
 	"time"
@@ -53,7 +53,6 @@ func (r *occurrenceRepository) Create(uri string, userID string, req model.Occur
 }
 
 func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.OccurrenceListItem, error) {
-	// フィルタリングロジック: 公開 or 自分のデータ
 	filter := "(!BOUND(?vis) || ?vis = \"public\")"
 	if currentUserID != "" {
 		filter += fmt.Sprintf(" || (BOUND(?creator) && str(?creator) = \"http://my-db.org/user/%s\")", currentUserID)
@@ -64,7 +63,6 @@ func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.Occurrence
 		PREFIX dcterms: <http://purl.org/dc/terms/>
 		PREFIX ex: <http://my-db.org/data/>
 		
-		# ★ ?created を追加
 		SELECT ?id ?taxonName ?remarks ?creator ?created
 		WHERE {
 			?id a dwc:Occurrence ;
@@ -72,7 +70,7 @@ func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.Occurrence
 			OPTIONAL { ?id dwc:occurrenceRemarks ?remarks }
 			OPTIONAL { ?id dcterms:creator ?creator }
 			OPTIONAL { ?id ex:visibility ?vis }
-			OPTIONAL { ?id dcterms:created ?created } # ★追加
+			OPTIONAL { ?id dcterms:created ?created }
 
 			FILTER (%s)
 		}
@@ -99,8 +97,8 @@ func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.Occurrence
 			TaxonName: b["taxonName"].Value,
 			Remarks:   safeValue(b, "remarks"),
 			OwnerID:   ownerID,
-			OwnerName: "", 
-			CreatedAt: safeValue(b, "created"), 
+			OwnerName: "",
+			CreatedAt: safeValue(b, "created"),
 		})
 	}
 	return list, nil
@@ -113,23 +111,22 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 		PREFIX dcterms: <http://purl.org/dc/terms/>
 		PREFIX ex: <http://my-db.org/data/>
-        PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> 
 
-		# ★ ?created を追加
-		SELECT ?taxonName ?remarks ?traitID ?traitLabel ?creator ?vis ?created
+		SELECT ?taxonName ?remarks ?pred ?predLabel ?val ?valLabel ?creator ?vis ?created
 		WHERE {
 			<%s> dwc:scientificName ?taxonName .
 			OPTIONAL { <%s> dwc:occurrenceRemarks ?remarks }
 			OPTIONAL { <%s> dcterms:creator ?creator }
 			OPTIONAL { <%s> ex:visibility ?vis }
-			OPTIONAL { <%s> dcterms:created ?created } # ★追加
+			OPTIONAL { <%s> dcterms:created ?created }
+			
 			OPTIONAL {
-				<%s> ro:0000053 ?traitID .
-				OPTIONAL { ?traitID rdfs:label ?traitLabel }
+				<%s> ?pred ?val .
+				OPTIONAL { ?pred rdfs:label ?predLabel }
+				OPTIONAL { ?val rdfs:label ?valLabel }
 			}
 		}
 	`, uri, uri, uri, uri, uri, uri)
-
 
 	results, err := r.sendQuery(query)
 	if err != nil {
@@ -151,29 +148,24 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 		TaxonName: results[0]["taxonName"].Value,
 		Remarks:   safeValue(results[0], "remarks"),
 		OwnerID:   ownerID,
-		CreatedAt: safeValue(results[0], "created"), // ★取得
+		CreatedAt: safeValue(results[0], "created"),
 		Traits:    []model.Trait{},
 	}
 
-	// システム予約プロパティを除外
 	ignoredPredicates := map[string]bool{
 		"http://www.w3.org/1999/02/22-rdf-syntax-ns#type": true,
 		"http://rs.tdwg.org/dwc/terms/scientificName": true,
 		"http://rs.tdwg.org/dwc/terms/scientificNameID": true,
 		"http://rs.tdwg.org/dwc/terms/occurrenceRemarks": true,
 		"http://purl.org/dc/terms/creator": true,
+		"http://purl.org/dc/terms/created": true,
 		"http://my-db.org/data/visibility": true,
 	}
 
 	seen := make(map[string]bool)
 	for _, b := range results {
 		predURI := b["pred"].Value
-		
-		if predURI == "" {
-			continue
-		}
-
-		if ignoredPredicates[predURI] {
+		if predURI == "" || ignoredPredicates[predURI] {
 			continue
 		}
 
@@ -221,8 +213,8 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 		WHERE {
 			?occ dwc:scientificNameID <%s> .
 			OPTIONAL {
-				?occ ro:0000053 ?traitID .
-				?traitID rdfs:label ?traitLabel .
+				?occ ?pred ?val .
+				?val rdfs:label ?traitLabel .
 			}
 		}
 	`, taxonURI)
@@ -243,6 +235,44 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 	return stats, nil
 }
 
+func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) {
+	query := fmt.Sprintf(`
+		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
+		
+		SELECT DISTINCT (?uri AS ?id)
+		WHERE {
+		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+			?root rdfs:label ?label .
+			FILTER (lcase(str(?label)) = lcase("%s"))
+			?uri rdfs:subClassOf* ?root .
+		  }
+		  ?occ dwc:scientificNameID ?uri .
+		}
+		LIMIT 1000
+	`, label)
+
+	results, err := r.sendQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, b := range results {
+		if val, ok := b["id"]; ok {
+			uri := val.Value
+			if strings.Contains(uri, "NCBITaxon_") {
+				parts := strings.Split(uri, "NCBITaxon_")
+				if len(parts) > 1 {
+					ids = append(ids, "ncbi:"+parts[1])
+				}
+			}
+		}
+	}
+	return ids, nil
+}
+
+// ★実装完了: 指定されたIDの祖先（親、親の親...）を全て取得する
 func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) {
     // ncbi:123 -> http://.../NCBITaxon_123
     uri := "http://purl.obolibrary.org/obo/" + strings.ReplaceAll(taxonID, ":", "_")
@@ -259,9 +289,26 @@ func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) 
 	`, uri)
 
 	results, err := r.sendQuery(query)
-    // ... (結果を []string "ncbi:..." に変換して返す)
+	if err != nil {
+		return nil, err
+	}
+
+	var ancestors []string
+	for _, b := range results {
+		if val, ok := b["ancestor"]; ok {
+			uri := val.Value
+			if strings.Contains(uri, "NCBITaxon_") {
+				parts := strings.Split(uri, "NCBITaxon_")
+				if len(parts) > 1 {
+					ancestors = append(ancestors, "ncbi:"+parts[1])
+				}
+			}
+		}
+	}
+	return ancestors, nil
 }
 
+// ★実装完了: 名前からIDを1つ特定する
 func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -276,19 +323,33 @@ func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
 	`, label)
 
 	results, err := r.sendQuery(query)
-    // ... (結果があれば "ncbi:..." に変換して返す、なければ空文字)
+	if err != nil {
+		return "", err
+	}
+	if len(results) == 0 {
+		return "", nil
+	}
+
+	uri := safeValue(results[0], "uri")
+	if strings.Contains(uri, "NCBITaxon_") {
+		parts := strings.Split(uri, "NCBITaxon_")
+		if len(parts) > 1 {
+			return "ncbi:" + parts[1], nil
+		}
+	}
+	return "", nil
 }
 
 // ---------------------------------------------------
 // Helper
 // ---------------------------------------------------
+
 func (r *occurrenceRepository) buildInsertSPARQL(uri string, userID string, req model.OccurrenceRequest) (string, error) {
 	visibility := "private"
 	if req.IsPublic {
 		visibility = "public"
 	}
 	
-	// デフォルト値
 	taxonID := req.TaxonID
 	if taxonID == "" { taxonID = "ncbi:unknown" }
 	taxonLabel := req.TaxonLabel
@@ -311,7 +372,7 @@ INSERT DATA {
     dwc:scientificName "{{.TaxonLabel}}" ;
     dcterms:creator <http://my-db.org/user/{{.UserID}}> ;
     ex:visibility "{{.Visibility}}" ;
-    dcterms:created "{{.CreatedAt}}"^^xsd:dateTime ;  # ★日時を追加！
+    dcterms:created "{{.CreatedAt}}"^^xsd:dateTime ;
     dwc:occurrenceRemarks "{{.Remarks}}" .
 
   {{range .Traits}}
@@ -324,8 +385,7 @@ INSERT DATA {
 	type TraitSafe struct {
 		PredURI, PredLabel, ValURI, ValLabel string
 	}
-	
-	// URI解決
+
 	var safeTraits []TraitSafe
 	for _, t := range req.Traits {
 		safeTraits = append(safeTraits, TraitSafe{
@@ -335,7 +395,6 @@ INSERT DATA {
 			ValLabel:  t.ValueLabel,
 		})
 	}
-
 
 	data := struct {
 		URI, TaxonURI, TaxonLabel, Remarks, UserID, Visibility, CreatedAt string
@@ -347,8 +406,8 @@ INSERT DATA {
 		Remarks:    req.Remarks,
 		UserID:     userID,
 		Visibility: visibility,
-		Traits:     safeTraits,
 		CreatedAt:  now,
+		Traits:     safeTraits,
 	}
 
 	t, err := template.New("sparql").Parse(tpl)
@@ -362,44 +421,22 @@ INSERT DATA {
 	return buf.String(), nil
 }
 
-func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) {
-	// 小文字にして検索（表記ゆれ吸収のため）
-	// NCBI Taxonomyのグラフを指定して検索するのだ
-	query := fmt.Sprintf(`
-		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-		
-		SELECT DISTINCT (?uri AS ?id)
-		WHERE {
-		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-			# 1. ラベルが一致するクラスを探す (lcaseで大文字小文字無視)
-			?root rdfs:label ?label .
-			FILTER (lcase(str(?label)) = lcase("%s"))
-
-			# 2. そのクラスの子孫を再帰的に取得 (自分自身も含む)
-			?uri rdfs:subClassOf* ?root .
-		  }
-		}
-		LIMIT 100 # 安全のため制限
-	`, label)
-
-	results, err := r.sendQuery(query)
-	if err != nil {
-		return nil, err
+func resolveURI(id, label, userType string) string {
+	if id != "" {
+		if strings.HasPrefix(id, "http") { return id }
+		safeID := strings.ReplaceAll(id, ":", "_")
+		return "http://purl.obolibrary.org/obo/" + safeID
 	}
+	encodedLabel := url.PathEscape(label)
+	return fmt.Sprintf("http://my-db.org/%s/%s", userType, encodedLabel)
+}
 
-	var ids []string
-	for _, b := range results {
-		uri := b["id"].Value
-		// URI (http://purl.obolibrary.org/obo/NCBITaxon_34844) を
-		// アプリで使うID形式 (ncbi:34844) に変換する
-		if strings.Contains(uri, "NCBITaxon_") {
-			parts := strings.Split(uri, "NCBITaxon_")
-			if len(parts) > 1 {
-				ids = append(ids, "ncbi:"+parts[1])
-			}
-		}
+func shortenID(uri string) string {
+	if strings.Contains(uri, "/obo/") {
+		parts := strings.Split(uri, "/obo/")
+		return strings.ReplaceAll(parts[len(parts)-1], "_", ":")
 	}
-	return ids, nil
+	return uri
 }
 
 func (r *occurrenceRepository) sendUpdate(sparql string) error {
@@ -473,22 +510,4 @@ func safeValue(binding map[string]bindingValue, key string) string {
 		return v.Value
 	}
 	return ""
-}
-
-func resolveURI(id, label, userType string) string {
-	if id != "" {
-		if strings.HasPrefix(id, "http") { return id }
-		safeID := strings.ReplaceAll(id, ":", "_")
-		return "http://purl.obolibrary.org/obo/" + safeID
-	}
-	encodedLabel := url.PathEscape(label)
-	return fmt.Sprintf("http://my-db.org/%s/%s", userType, encodedLabel)
-}
-
-func shortenID(uri string) string {
-	if strings.Contains(uri, "/obo/") {
-		parts := strings.Split(uri, "/obo/")
-		return strings.ReplaceAll(parts[len(parts)-1], "_", ":")
-	}
-	return uri
 }
