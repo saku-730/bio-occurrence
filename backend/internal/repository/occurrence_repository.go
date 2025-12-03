@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,7 +41,7 @@ func NewOccurrenceRepository(baseURL, user, pass string) OccurrenceRepository {
 		queryURL:  baseURL + "/query",
 		username:  user,
 		password:  pass,
-		client:    &http.Client{Timeout: 10 * time.Second},
+		client:    &http.Client{Timeout: 60 * time.Second},
 	}
 }
 
@@ -239,8 +240,8 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 	return stats, nil
 }
 
-// GetDescendantIDs: 名前から子孫IDを取得 (推論検索用)
-// ★修正: rdfs:label だけでなく skos:altLabel も検索対象にする！
+// ★修正: 名前から子孫IDを取得 (推論検索用)
+// label だけでなく altLabel (別名) も検索する！
 func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) {
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -249,16 +250,16 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 		
 		SELECT DISTINCT (?uri AS ?id)
 		WHERE {
+		  # 1. オントロジーから「その名前の概念」と「子孫」を探す
 		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-			# ラベル検索 (label OR altLabel)
+			# ★修正: UNIONを使って別名も検索
 			{ ?root rdfs:label ?name } UNION { ?root skos:altLabel ?name }
 			FILTER (lcase(str(?name)) = lcase("%s"))
 			
-			# 子孫を取得
 			?uri rdfs:subClassOf* ?root .
 		  }
 
-		  # 実際に使われているIDに絞る
+		  # 2. 実際にオカレンスデータで使われているIDだけに絞る
 		  ?occ dwc:scientificNameID ?uri .
 		}
 		LIMIT 1000
@@ -289,7 +290,7 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	return ids, nil
 }
 
-// GetAncestorIDs: 祖先を取得 (登録用)
+// ★修正: 祖先ID取得
 func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) {
     uri := resolveURI(taxonID, "", "user_taxon")
 	if strings.Contains(uri, "user_taxon") {
@@ -331,9 +332,11 @@ func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) 
 	return ancestors, nil
 }
 
-// GetTaxonIDByLabel: 名前からIDを引く (検索用)
-// ★修正: rdfs:label だけでなく skos:altLabel も検索対象にする！
+// ★修正: 名前からIDを引く (検索用)
+// label だけでなく altLabel も検索！
 func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
+	log.Printf("🔍 [GetTaxonIDByLabel] Start looking up: '%s'", label)
+
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 		PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
@@ -350,18 +353,26 @@ func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
 
 	results, err := r.sendQuery(query)
 	if err != nil {
+		log.Printf("❌ [GetTaxonIDByLabel] Query failed: %v", err)
 		return "", err
 	}
-	fmt.Printf("🔍 Search '%s' -> Found %d results\n", label, len(results))
+	
+	log.Printf("✅ [GetTaxonIDByLabel] Found %d results", len(results))
+
 	if len(results) == 0 {
+		log.Printf("   -> No ID found for '%s'", label)
 		return "", nil
 	}
 
 	uri := safeValue(results[0], "uri")
+	log.Printf("   -> Raw URI found: %s", uri)
+
 	if strings.Contains(uri, "NCBITaxon_") {
 		parts := strings.Split(uri, "NCBITaxon_")
 		if len(parts) > 1 {
-			return "ncbi:" + parts[1], nil
+			id := "ncbi:" + parts[1]
+			log.Printf("   -> Converted ID: %s", id)
+			return id, nil
 		}
 	}
 	return "", nil
@@ -493,41 +504,45 @@ func (r *occurrenceRepository) sendUpdate(sparql string) error {
 }
 
 func (r *occurrenceRepository) sendQuery(sparql string) ([]map[string]bindingValue, error) {
-	// ★変更: GET ではなく POST を使う
-	// データは URLパラメータ(?query=...) ではなく、Body (application/sparql-query) ではなく
-	// フォームデータ (application/x-www-form-urlencoded) として送るのが一番安定するのだ。
-
 	data := url.Values{}
 	data.Set("query", sparql)
+
+	// ★追加: クエリの内容を表示
+	log.Printf("📡 [sendQuery] Sending SPARQL:\n%s", sparql)
 
 	req, err := http.NewRequest("POST", r.queryURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
-
-	// ★変更: ヘッダーをフォーム送信形式にする
+	
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/sparql-results+json")
 	r.setBasicAuth(req)
 
 	resp, err := r.client.Do(req)
 	if err != nil {
+		log.Printf("❌ [sendQuery] Request error: %v", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	
+	// ★追加: レスポンスの中身（JSON）を表示
+	log.Printf("📥 [sendQuery] Response Status: %s", resp.Status)
+	log.Printf("📥 [sendQuery] Response Body: %s", string(bodyBytes))
+
 	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var result sparqlResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		log.Printf("❌ [sendQuery] JSON Decode Error: %v", err)
 		return nil, err
 	}
 	return result.Results.Bindings, nil
 }
-
 
 func (r *occurrenceRepository) setBasicAuth(req *http.Request) {
 	auth := r.username + ":" + r.password
