@@ -57,6 +57,11 @@ export default function OccurrenceForm({ id, initialData }: Props) {
     }
   };
 
+  const handleTaxonChange = (val: string) => {
+    setTaxonLabel(val);
+    setTaxonID("");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -130,6 +135,7 @@ export default function OccurrenceForm({ id, initialData }: Props) {
 	<TaxonSearch 
 	initialValue={taxonLabel} 
 	onSelect={handleTaxonSelect} 
+	onChange={handleTaxonChange}
 	/>
 
 	{/* ID確認用（デバッグ用に見せてもいいし、hiddenにしてもいい） */}

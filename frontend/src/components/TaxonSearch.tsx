@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { meiliClient, INDEX_CLASSIFICATION } from "@/lib/meilisearch";
 import { Search, Loader2 } from "lucide-react";
 
-// 検索結果の型
 export type TaxonResult = {
   id: string;
   label: string;
@@ -15,25 +14,29 @@ export type TaxonResult = {
 
 type Props = {
   initialValue?: string;
-  onSelect: (item: TaxonResult | null) => void; // nullならクリア
+  onSelect: (item: TaxonResult | null) => void;
+  onChange?: (val: string) => void; // ★追加: 文字入力時のコールバック
 };
 
-export default function TaxonSearch({ initialValue, onSelect }: Props) {
+export default function TaxonSearch({ initialValue, onSelect, onChange }: Props) {
   const [query, setQuery] = useState(initialValue || "");
   const [results, setResults] = useState<TaxonResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
 
-  // 親からの初期値が変わったら反映
   useEffect(() => {
     setQuery(initialValue || "");
   }, [initialValue]);
 
   const handleSearch = async (text: string) => {
     setQuery(text);
+    
+    // ★追加: 文字が変わったら親に通知する
+    if (onChange) onChange(text);
+
     setIsOpen(true);
 
-    if (text.length < 2) { // 2文字以上で検索開始（ヒット数が多すぎるのを防ぐ）
+    if (text.length < 2) {
       setResults([]);
       return;
     }
@@ -55,7 +58,6 @@ export default function TaxonSearch({ initialValue, onSelect }: Props) {
     setIsOpen(false);
   };
 
-  // 入力欄からフォーカスが外れた時の処理（少し遅らせないとクリック判定前に消える）
   const handleBlur = () => {
     setTimeout(() => setIsOpen(false), 200);
   };
@@ -66,10 +68,7 @@ export default function TaxonSearch({ initialValue, onSelect }: Props) {
         <input
           type="text"
           value={query}
-          onChange={(e) => {
-            handleSearch(e.target.value);
-            if (e.target.value === "") onSelect(null); // クリア通知
-          }}
+          onChange={(e) => handleSearch(e.target.value)}
           onFocus={() => query.length >= 2 && setIsOpen(true)}
           onBlur={handleBlur}
           placeholder="生物名を検索 (例: タヌキ, Homo sapiens...)"
