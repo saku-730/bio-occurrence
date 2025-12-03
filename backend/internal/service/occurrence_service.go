@@ -4,8 +4,8 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"github.com/saku-730/bio-occurrence/backend/internal/repository"
 	"fmt"
-	"strings"
 	"log"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -23,14 +23,13 @@ type OccurrenceService interface {
 type occurrenceService struct {
 	repo       repository.OccurrenceRepository
 	searchRepo repository.SearchRepository
-	userRepo   repository.UserRepository // ★追加: ユーザー情報を引くため
+	userRepo   repository.UserRepository
 }
 
-// コンストラクタに userRepo を追加
 func NewOccurrenceService(
 	repo repository.OccurrenceRepository,
 	searchRepo repository.SearchRepository,
-	userRepo repository.UserRepository, // ★追加
+	userRepo repository.UserRepository,
 ) OccurrenceService {
 	return &occurrenceService{
 		repo:       repo,
@@ -40,7 +39,7 @@ func NewOccurrenceService(
 }
 
 func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest) (string, error) {
-	// 1. ユーザー情報を取得（検索インデックスに名前を入れるため）
+	// 1. ユーザー情報を取得
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
 		return "", fmt.Errorf("failed to find user: %w", err)
@@ -49,22 +48,24 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 		return "", fmt.Errorf("user not found")
 	}
 
+	// 2. 祖先の取得 (Fusekiから)
+	// これがないと検索時に引っかからないので重要！
 	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
 	if err != nil {
 		log.Printf("⚠️ 祖先の取得に失敗: %v", err)
-		ancestors = []string{req.TaxonID} // 最低限自分自身は入れる
+		ancestors = []string{req.TaxonID} // 失敗しても自分自身は入れる
 	}
 
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
 	
-	// 2. Fusekiに保存
+	// 3. Fusekiに保存
 	err = s.repo.Create(occURI, userID, req)
 	if err != nil {
 		return "", err
 	}
 
-	// 3. Meilisearchにも保存 (ユーザーIDと名前も渡す！)
+	// 4. Meilisearchにも保存 (祖先リスト付きで！)
 	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username, ancestors); err != nil {
 		return occURI, err 
 	}
@@ -78,7 +79,6 @@ func (s *occurrenceService) GetAll(currentUserID string) ([]model.OccurrenceList
 		return nil, err
 	}
 
-	// N+1問題になるけど、今はシンプルにループでユーザー名を取得するのだ
 	for i, item := range list {
 		if item.OwnerID != "" {
 			user, err := s.userRepo.FindByID(item.OwnerID)
@@ -102,7 +102,6 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 		return nil, nil
 	}
 
-	// ユーザー名を取得
 	if detail.OwnerID != "" {
 		user, err := s.userRepo.FindByID(detail.OwnerID)
 		if err == nil && user != nil {
@@ -115,38 +114,9 @@ func (s *occurrenceService) GetDetail(id string) (*model.OccurrenceDetail, error
 	return detail, nil
 }
 
-func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
-	targetTaxonID := ""
-
-	// クエリが空でない場合、それが「分類名」かどうかを確認する
-	if query != "" {
-        // GetTaxonIDByName みたいなメソッドをRepoに追加して呼ぶのが綺麗だけど、
-        // 既存の GetDescendantIDs のロジックを少し変えて「IDだけ返す」メソッドを作ると良い
-        
-        // 今回は簡易的に、Repoに新メソッドを追加せず、既存の GetDescendantIDs を流用するハックでいくなら:
-        // しかし、GetDescendantIDsは「子孫全部」を返すので重い。
-        // 「名前からID1つだけ」を返すメソッドをRepoに追加するのが正解なのだ。
-        
-        // ★Repositoryに GetTaxonIDByLabel を追加したと仮定する
-		id, err := s.repo.GetTaxonIDByLabel(query)
-		if err == nil && id != "" {
-			targetTaxonID = id
-            // IDが見つかったら、クエリ文字列は空にしてフィルタリング検索に切り替える
-            // (そうしないと "Vertebrata" という文字を持たないデータがヒットしないため)
-            query = ""
-            fmt.Printf("🧠 推論検索: %s -> %s の子孫を検索します\n", query, targetTaxonID)
-		}
-	}
-
-	// 検索実行
-	return s.searchRepo.Search(query, userID, targetTaxonID)
-}
-
-
 func (s *occurrenceService) Modify(userID string, id string, req model.OccurrenceRequest) error {
 	targetURI := "http://my-db.org/occ/" + id
 
-	// ★追加: まず既存データを取得して所有者チェック！
 	existing, err := s.repo.FindByID(targetURI)
 	if err != nil {
 		return err
@@ -154,9 +124,8 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 	if existing == nil {
 		return fmt.Errorf("not found")
 	}
-	// 持ち主じゃなかったらエラー！
 	if existing.OwnerID != userID {
-		return fmt.Errorf("permission denied: あなたのデータではない")
+		return fmt.Errorf("permission denied: あなたのデータではないのだ")
 	}
 
 	user, err := s.userRepo.FindByID(userID)
@@ -164,13 +133,10 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 		return fmt.Errorf("failed to find user")
 	}
 
-	if err := s.repo.Update(targetURI, userID, req); err != nil {
-		return err
-	}
-
+	// 更新時も祖先を再取得
 	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
 	if err != nil {
-		// エラーなら自分自身だけ入れる
+		log.Printf("⚠️ 祖先の取得に失敗: %v", err)
 		ancestors = []string{req.TaxonID}
 	}
 
@@ -178,14 +144,12 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 		return err
 	}
 	
-	// 引数を追加
 	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username, ancestors)
 }
 
 func (s *occurrenceService) Remove(userID string, id string) error {
 	targetURI := "http://my-db.org/occ/" + id
 	
-	// ★追加: 所有者チェック！
 	existing, err := s.repo.FindByID(targetURI)
 	if err != nil {
 		return err
@@ -194,15 +158,13 @@ func (s *occurrenceService) Remove(userID string, id string) error {
 		return fmt.Errorf("not found")
 	}
 	if existing.OwnerID != userID {
-		return fmt.Errorf("permission denied: 他人のデータは消せない")
+		return fmt.Errorf("permission denied: 他人のデータは消せないのだ")
 	}
 
-	// 1. Fuseki削除
 	if err := s.repo.Delete(targetURI); err != nil {
 		return err
 	}
 	
-	// 2. Meilisearch削除
 	return s.searchRepo.DeleteOccurrence(targetURI)
 }
 
@@ -212,3 +174,27 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
 
+func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
+	targetTaxonID := ""
+
+	// ★修正: 検索ワードがある場合、Fusekiに問い合わせてIDを探す
+	if query != "" {
+		// 例: "Carnivora" -> "ncbi:33554"
+		id, err := s.repo.GetTaxonIDByLabel(query)
+		
+		if err == nil && id != "" {
+			targetTaxonID = id
+			fmt.Printf("🧠 推論ヒット: '%s' -> ID '%s' の子孫を検索します\n", query, id)
+			
+			// ★重要: IDが見つかったら、キーワード検索は無効化する！
+			// (そうしないと「Carnivora」という文字を含まないデータがヒットしなくなる)
+			query = ""
+		} else {
+			fmt.Printf("ℹ️ 推論ヒットなし: '%s' (通常のキーワード検索を行います)\n", query)
+		}
+	}
+
+	// 検索実行
+	// queryが空でも targetTaxonID があれば、祖先フィルタで検索される
+	return s.searchRepo.Search(query, userID, targetTaxonID)
+}
