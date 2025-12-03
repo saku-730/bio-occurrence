@@ -18,6 +18,7 @@ type OccurrenceDocument struct {
 	OwnerID    string   `json:"owner_id"`
 	OwnerName  string   `json:"owner_name"`
 	IsPublic   bool     `json:"is_public"`
+	Ancestors  []string `json:"ancestors"`
 }
 
 type SearchRepository interface {

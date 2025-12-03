@@ -5,6 +5,7 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/repository"
 	"fmt"
 	"strings"
+	"log"
 
 	"github.com/google/uuid"
 )
@@ -48,6 +49,12 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 		return "", fmt.Errorf("user not found")
 	}
 
+	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
+	if err != nil {
+		log.Printf("⚠️ 祖先の取得に失敗: %v", err)
+		ancestors = []string{req.TaxonID} // 最低限自分自身は入れる
+	}
+
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
 	
@@ -58,8 +65,7 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 	}
 
 	// 3. Meilisearchにも保存 (ユーザーIDと名前も渡す！)
-	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username); err != nil {
-		// 検索インデックスへの登録失敗はログに出す程度でも良いが、今回はエラーを返す
+	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username, ancestors); err != nil {
 		return occURI, err 
 	}
 
@@ -168,19 +174,14 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 }
 
 func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
-	// Step 1: 推論 (Inference)
-	// 検索ワードが「分類名（例: Vertebrata）」かどうかFusekiに問い合わせる
-	var taxonIDs []string
-	if query != "" {
-		// エラーが出ても検索自体は止めない（単なるキーワード検索として続行）
-		ids, err := s.repo.GetDescendantIDs(query)
-		if err == nil && len(ids) > 0 {
-			taxonIDs = ids
-			fmt.Printf("🧠 推論ヒット: '%s' は %d 件の下位分類を含みます\n", query, len(ids))
-		}
-	}
+    // 検索ワードが「分類名」だった場合、そのIDを特定する（これは既存のGetDescendantIDsの一部ロジックを流用できる）
+    // 例えば "Vertebrata" -> "ncbi:7742" を特定するだけ。子孫展開はしない。
+    
+    targetTaxonID := ""
+    // ... (名前からIDを引くロジック) ...
 
-	// Step 2: 検索実行 (Meilisearch)
-	// 推論結果 (taxonIDs) も一緒に渡す
-	return s.searchRepo.Search(query, userID, taxonIDs)
+    // 検索実行
+    // 今までの `taxon_id IN [...]` ではなく、
+    // `ancestors = "ncbi:7742"` というフィルタだけで、その子孫すべてのデータがヒットするのだ！
+    return s.searchRepo.Search(query, userID, targetTaxonID)
 }
