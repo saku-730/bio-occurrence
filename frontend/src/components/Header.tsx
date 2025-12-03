@@ -11,14 +11,36 @@ export default function Header() {
     <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
-          {/* 左側: ロゴ（トップページへのリンク） */}
-          <Link 
-            href="/" 
-            className="text-xl font-black text-blue-600 flex items-center gap-2 hover:opacity-80 transition-opacity"
-          >
-            <Database className="h-6 w-6" />
-            <span>Bio Occurrence DB</span>
-          </Link>
+          
+          {/* 左側エリア：ロゴとナビゲーション */}
+          <div className="flex items-center gap-8">
+            {/* ロゴ（トップページへのリンク） */}
+            <Link 
+              href="/" 
+              className="text-xl font-black text-blue-600 flex items-center gap-2 hover:opacity-80 transition-opacity"
+            >
+              <Database className="h-6 w-6" />
+              <span>Bio Occurrence DB</span>
+            </Link>
+
+            {/* ナビゲーションリンク (ログイン時のみ表示) */}
+            {user && (
+              <nav className="hidden md:flex gap-6">
+                <Link 
+                  href="/occurrences" 
+                  className="text-sm font-bold text-gray-600 hover:text-blue-600 transition-colors"
+                >
+                  一覧・検索
+                </Link>
+                <Link 
+                  href="/create" 
+                  className="text-sm font-bold text-gray-600 hover:text-blue-600 transition-colors"
+                >
+                  新規登録
+                </Link>
+              </nav>
+            )}
+          </div>
 
           {/* 右側: ユーザー情報とログアウト */}
           <div className="flex items-center gap-4">
