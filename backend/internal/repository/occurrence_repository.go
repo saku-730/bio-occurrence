@@ -330,7 +330,7 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 		
-		SELECT DISTINCT ?id
+		SELECT DISTINCT (?uri AS ?id)
 		WHERE {
 		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
 			# 1. ラベルが一致するクラスを探す (lcaseで大文字小文字無視)
@@ -341,7 +341,7 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 			?uri rdfs:subClassOf* ?root .
 		  }
 		}
-		LIMIT 10000 # 安全のため制限
+		LIMIT 100 # 安全のため制限
 	`, label)
 
 	results, err := r.sendQuery(query)
