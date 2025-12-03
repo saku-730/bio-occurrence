@@ -106,11 +106,11 @@ func (r *searchRepository) Search(query string, currentUserID string, targetTaxo
 		// 分類指定がある場合はキーワード検索はオプションにする（フィルタリングが主役）
 		// ただしqueryがあればAND条件になるのでそのまま渡してOK
 	}
-
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
 		Limit:  50,
 		Filter: filter,
 	})
+	fmt.Print(searchRes)
 	if err != nil {
 		return nil, err
 	}

@@ -204,8 +204,6 @@ func (r *occurrenceRepository) Delete(uri string) error {
 }
 
 func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error) {
-	// ★修正: ここでも resolveURI を使って正規のURIに変換する
-	// 念のため直接渡された場合も考慮して変換
 	if strings.HasPrefix(rawID, "ncbi:") {
 		taxonURI = resolveURI(rawID, "", "user_taxon")
 	}
@@ -241,22 +239,26 @@ func (r *occurrenceRepository) GetTaxonStats(taxonURI string, rawID string) (*mo
 	return stats, nil
 }
 
-// ★修正: 子孫ID取得（推論検索用）
+// GetDescendantIDs: 名前から子孫IDを取得 (推論検索用)
+// ★修正: rdfs:label だけでなく skos:altLabel も検索対象にする！
 func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) {
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
 		
 		SELECT DISTINCT (?uri AS ?id)
 		WHERE {
-		  # 1. オントロジーから「その名前の概念」と「子孫」を探す
 		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-			?root rdfs:label ?label .
-			FILTER (lcase(str(?label)) = lcase("%s"))
+			# ラベル検索 (label OR altLabel)
+			{ ?root rdfs:label ?name } UNION { ?root skos:altLabel ?name }
+			FILTER (lcase(str(?name)) = lcase("%s"))
+			
+			# 子孫を取得
 			?uri rdfs:subClassOf* ?root .
 		  }
 
-		  # 2. 実際にオカレンスデータで使われているIDだけに絞る
+		  # 実際に使われているIDに絞る
 		  ?occ dwc:scientificNameID ?uri .
 		}
 		LIMIT 1000
@@ -271,14 +273,12 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	for _, b := range results {
 		if val, ok := b["id"]; ok {
 			uri := val.Value
-			// URI -> ID (NCBITaxon_123 -> ncbi:123)
 			if strings.Contains(uri, "NCBITaxon_") {
 				parts := strings.Split(uri, "NCBITaxon_")
 				if len(parts) > 1 {
 					ids = append(ids, "ncbi:"+parts[1])
 				}
 			} else if strings.Contains(uri, "ncbi_") {
-				// 古いデータ形式も一応拾えるようにしておく
 				parts := strings.Split(uri, "ncbi_")
 				if len(parts) > 1 {
 					ids = append(ids, "ncbi:"+parts[1])
@@ -289,13 +289,9 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	return ids, nil
 }
 
-// ★修正: 祖先ID取得（登録時のAncestors用）
+// GetAncestorIDs: 祖先を取得 (登録用)
 func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) {
-	// ★重要: ncbi:123 -> NCBITaxon_123 に変換してオントロジーを検索する！
-	// resolveURIを通すと NCBITaxon_ になるように調整済み
-	uri := resolveURI(taxonID, "", "user_taxon")
-
-	// もしユーザー定義IDなら祖先はない
+    uri := resolveURI(taxonID, "", "user_taxon")
 	if strings.Contains(uri, "user_taxon") {
 		return []string{taxonID}, nil
 	}
@@ -305,7 +301,6 @@ func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) 
 		SELECT ?ancestor
 		WHERE {
 		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-            # 自分自身も含めて、親を再帰的にたどる
 			<%s> rdfs:subClassOf* ?ancestor .
 		  }
 		}
@@ -329,7 +324,6 @@ func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) 
 		}
 	}
 	
-	// 検索結果が空（オントロジーにないID）なら、自分自身だけ返す
 	if len(ancestors) == 0 {
 		ancestors = append(ancestors, taxonID)
 	}
@@ -337,15 +331,18 @@ func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) 
 	return ancestors, nil
 }
 
-// ★修正: 名前からIDを引く
+// GetTaxonIDByLabel: 名前からIDを引く (検索用)
+// ★修正: rdfs:label だけでなく skos:altLabel も検索対象にする！
 func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
 	query := fmt.Sprintf(`
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
+		
 		SELECT ?uri
 		WHERE {
 		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-			?uri rdfs:label ?label .
-			FILTER (lcase(str(?label)) = lcase("%s"))
+			{ ?uri rdfs:label ?name } UNION { ?uri skos:altLabel ?name }
+			FILTER (lcase(str(?name)) = lcase("%s"))
 		  }
 		}
 		LIMIT 1
@@ -355,6 +352,7 @@ func (r *occurrenceRepository) GetTaxonIDByLabel(label string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	fmt.Printf("🔍 Search '%s' -> Found %d results\n", label, len(results))
 	if len(results) == 0 {
 		return "", nil
 	}
@@ -450,21 +448,15 @@ INSERT DATA {
 	return buf.String(), nil
 }
 
-// ★最重要修正: IDの変換ロジック
 func resolveURI(id, label, userType string) string {
 	if id != "" {
-		// すでにフルURIの場合はそのまま返す
 		if strings.HasPrefix(id, "http") { return id }
-		
-		// ★ここ！ "ncbi:" を "NCBITaxon_" に変換して、オントロジーと形式を合わせる！
 		safeID := strings.ReplaceAll(id, ":", "_")
 		if strings.HasPrefix(id, "ncbi:") {
 			safeID = strings.Replace(safeID, "ncbi_", "NCBITaxon_", 1)
 		}
-
 		return "http://purl.obolibrary.org/obo/" + safeID
 	}
-	// IDがない場合は独自URI
 	encodedLabel := url.PathEscape(label)
 	return fmt.Sprintf("http://my-db.org/%s/%s", userType, encodedLabel)
 }
@@ -473,14 +465,12 @@ func shortenID(uri string) string {
 	if strings.Contains(uri, "/obo/") {
 		parts := strings.Split(uri, "/obo/")
 		id := parts[len(parts)-1]
-		// ★ここ！ 表示するときは "NCBITaxon_" を "ncbi:" に戻してあげる
 		id = strings.Replace(id, "NCBITaxon_", "ncbi:", 1)
 		return strings.ReplaceAll(id, "_", ":")
 	}
 	return uri
 }
 
-// ... (sendUpdate, sendQuery, setBasicAuth, struct定義, safeValue はそのまま) ...
 func (r *occurrenceRepository) sendUpdate(sparql string) error {
 	req, err := http.NewRequest("POST", r.updateURL, strings.NewReader(sparql))
 	if err != nil {
@@ -503,13 +493,20 @@ func (r *occurrenceRepository) sendUpdate(sparql string) error {
 }
 
 func (r *occurrenceRepository) sendQuery(sparql string) ([]map[string]bindingValue, error) {
-	req, err := http.NewRequest("GET", r.queryURL, nil)
+	// ★変更: GET ではなく POST を使う
+	// データは URLパラメータ(?query=...) ではなく、Body (application/sparql-query) ではなく
+	// フォームデータ (application/x-www-form-urlencoded) として送るのが一番安定するのだ。
+
+	data := url.Values{}
+	data.Set("query", sparql)
+
+	req, err := http.NewRequest("POST", r.queryURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
-	q := req.URL.Query()
-	q.Add("query", sparql)
-	req.URL.RawQuery = q.Encode()
+
+	// ★変更: ヘッダーをフォーム送信形式にする
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/sparql-results+json")
 	r.setBasicAuth(req)
 
@@ -530,6 +527,7 @@ func (r *occurrenceRepository) sendQuery(sparql string) ([]map[string]bindingVal
 	}
 	return result.Results.Bindings, nil
 }
+
 
 func (r *occurrenceRepository) setBasicAuth(req *http.Request) {
 	auth := r.username + ":" + r.password
