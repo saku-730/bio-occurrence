@@ -9,10 +9,14 @@ type OccurrenceRequest struct {
 	IsPublic   bool    `json:"is_public"`
 }
 
-// 形質データ
 type Trait struct {
-	ID    string `json:"id" binding:"required"`
-	Label string `json:"label" binding:"required"`
+	// 述語 (Predicate / Relationship)
+	PredicateID    string `json:"predicate_id"`    // オントロジーID (例: ro:0002470) 。なければ空文字。
+	PredicateLabel string `json:"predicate_label"` // 表示名 (例: 食べる)。必須。
+
+	// 値 (Object / Value)
+	ValueID    string `json:"value_id"`    // オントロジーID (例: ncbi:50557) 。なければ空文字。
+	ValueLabel string `json:"value_label"` // 表示名 (例: 昆虫)。必須。
 }
 
 type OccurrenceListItem struct {
@@ -37,5 +41,5 @@ type OccurrenceDetail struct {
 type TaxonStats struct {
 	TaxonID    string   `json:"taxon_id"`
 	TotalCount string   `json:"total_count"`
-	Traits     []string `json:"traits"`
+	Traits     []string `json:"traits"` // 簡易表示用に文字列リストのまま
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"net/http"
 	"strings"
 	"text/template"
@@ -97,23 +98,33 @@ func (r *occurrenceRepository) FindAll(currentUserID string) ([]model.Occurrence
 	return list, nil
 }
 
+
 func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, error) {
 	query := fmt.Sprintf(`
 		PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
-		PREFIX ro: <http://purl.obolibrary.org/obo/RO_>
 		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 		PREFIX dcterms: <http://purl.org/dc/terms/>
 		PREFIX ex: <http://my-db.org/data/>
 
-		SELECT ?taxonName ?remarks ?traitID ?traitLabel ?creator ?vis
+		SELECT ?taxonName ?remarks ?pred ?predLabel ?val ?valLabel ?creator ?vis
 		WHERE {
 			<%s> dwc:scientificName ?taxonName .
 			OPTIONAL { <%s> dwc:occurrenceRemarks ?remarks }
 			OPTIONAL { <%s> dcterms:creator ?creator }
 			OPTIONAL { <%s> ex:visibility ?vis }
+			
+			# 形質データの取得 (述語 ?pred と 値 ?val)
 			OPTIONAL {
-				<%s> ro:0000053 ?traitID .
-				OPTIONAL { ?traitID rdfs:label ?traitLabel }
+				<%s> ?pred ?val .
+				
+				# 述語と値のラベルを取得 (なければURIそのものなどを出す)
+				OPTIONAL { ?pred rdfs:label ?predLabel }
+				OPTIONAL { ?val rdfs:label ?valLabel }
+				
+				# フィルタ: dwc: や dcterms: などのシステム用プロパティは除外したいが、
+				# ここでは簡易的に全部取って、アプリ側でフィルタするか、
+				# 登録時に専用のグラフに入れるのがベスト。
+				# 今回は「ラベルがついているもの」を優先的に形質とみなすロジックにする。
 			}
 		}
 	`, uri, uri, uri, uri, uri)
@@ -141,16 +152,41 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 		Traits:    []model.Trait{},
 	}
 
+	ignoredPredicates := map[string]bool{
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type": true,
+        "http://rs.tdwg.org/dwc/terms/scientificName": true,
+        "http://rs.tdwg.org/dwc/terms/scientificNameID": true,
+        "http://rs.tdwg.org/dwc/terms/occurrenceRemarks": true,
+        "http://purl.org/dc/terms/creator": true,
+        "http://my-db.org/data/visibility": true,
+	}
+
 	seen := make(map[string]bool)
+
 	for _, b := range results {
-		if tID, ok := b["traitID"]; ok {
-			if !seen[tID.Value] {
-				detail.Traits = append(detail.Traits, model.Trait{
-					ID:    tID.Value,
-					Label: safeValue(b, "traitLabel"),
-				})
-				seen[tID.Value] = true
-			}
+	predURI := b["pred"].Value
+	if ignoredPredicates[predURI] {
+	    continue
+	}
+
+		valURI := b["val"].Value
+		
+		// ID生成 (簡易版)
+		// http://purl.obolibrary.org/obo/RO_0002470 -> ro:0002470
+	// http://my-db.org/user_prop/hoge -> user:hoge
+		pID := shortenID(predURI)
+		vID := shortenID(valURI)
+		
+		// 重複排除キー
+		key := predURI + valURI
+		if !seen[key] {
+			detail.Traits = append(detail.Traits, model.Trait{
+				PredicateID:    pID,
+				PredicateLabel: safeValue(b, "predLabel"),
+				ValueID:        vID,
+				ValueLabel:     safeValue(b, "valLabel"),
+			})
+			seen[key] = true
 		}
 	}
 	return detail, nil
@@ -221,54 +257,61 @@ func (r *occurrenceRepository) buildInsertSPARQL(uri string, userID string, req 
 PREFIX ex: <http://my-db.org/data/>
 PREFIX dwc: <http://rs.tdwg.org/dwc/terms/>
 PREFIX dcterms: <http://purl.org/dc/terms/>
-PREFIX ro: <http://purl.obolibrary.org/obo/RO_>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
 INSERT DATA {
   <{{.URI}}> 
     a dwc:Occurrence ;
-    dwc:scientificNameID <http://purl.obolibrary.org/obo/{{.TaxonIDSafe}}> ;
+    dwc:scientificNameID <{{.TaxonURI}}> ;
     dwc:scientificName "{{.TaxonLabel}}" ;
     dcterms:creator <http://my-db.org/user/{{.UserID}}> ;
     ex:visibility "{{.Visibility}}" ;
     dwc:occurrenceRemarks "{{.Remarks}}" .
 
   {{range .Traits}}
-  <{{$.URI}}> ro:0000053 <http://purl.obolibrary.org/obo/{{.IDSafe}}> .
-  <http://purl.obolibrary.org/obo/{{.IDSafe}}> rdfs:label "{{.Label}}" .
+  # <オカレンス> <述語> <値> .
+  <{{$.URI}}> <{{.PredURI}}> <{{.ValURI}}> .
+  
+  # ラベル情報の保存 (表示用)
+  <{{.PredURI}}> rdfs:label "{{.PredLabel}}" .
+  <{{.ValURI}}> rdfs:label "{{.ValLabel}}" .
   {{end}}
 }
 `
-	taxonID := req.TaxonID
-	if taxonID == "" {
-		taxonID = "ncbi:unknown" // 未同定用の仮ID
-	}
-
-	taxonLabel := req.TaxonLabel
-	    if taxonLabel == "" {
-		taxonLabel = "未同定" // ラベルがない場合の表示
-	}
-
 	type TraitSafe struct {
-		IDSafe, Label string
+		PredURI, PredLabel string
+		ValURI, ValLabel   string
 	}
-	// スペルミスを修正 (Visibillity -> Visibility)
-	data := struct {
-		URI, TaxonIDSafe, TaxonLabel, Remarks, UserID, Visibility string
-		Traits                                                    []TraitSafe
-	}{
-		URI:         uri,
-		TaxonIDSafe: strings.ReplaceAll(taxonID, ":", "_"),
-		TaxonLabel:  taxonLabel,
-		Remarks:     req.Remarks,
-		UserID:      userID,
-		Visibility:  visibility,
-	}
+
+	// URI生成ロジック
+	var safeTraits []TraitSafe
 	for _, t := range req.Traits {
-		data.Traits = append(data.Traits, TraitSafe{
-			IDSafe: strings.ReplaceAll(t.ID, ":", "_"),
-			Label:  t.Label,
+		pURI := resolveURI(t.PredicateID, t.PredicateLabel, "user_prop")
+		vURI := resolveURI(t.ValueID, t.ValueLabel, "user_val")
+		
+		safeTraits = append(safeTraits, TraitSafe{
+			PredURI:   pURI,
+			PredLabel: t.PredicateLabel,
+			ValURI:    vURI,
+			ValLabel:  t.ValueLabel,
 		})
+	}
+    
+    // TaxonURIも解決
+    taxonURI := resolveURI(req.TaxonID, req.TaxonLabel, "user_taxon")
+    // もしIDが空ならラベルを使うが、TaxonIDが空の場合は "ncbi:unknown" 扱いにするなどの処理も可
+
+	data := struct {
+		URI, TaxonURI, TaxonLabel, Remarks, UserID, Visibility string
+		Traits                                                 []TraitSafe
+	}{
+		URI:        uri,
+		TaxonURI:   taxonURI,
+		TaxonLabel: req.TaxonLabel,
+		Remarks:    req.Remarks,
+		UserID:     userID,
+		Visibility: visibility,
+		Traits:     safeTraits,
 	}
 
 	t, err := template.New("sparql").Parse(tpl)
@@ -353,4 +396,35 @@ func safeValue(binding map[string]bindingValue, key string) string {
 		return v.Value
 	}
 	return ""
+}
+
+func resolveURI(id, label, userType string) string {
+	if id != "" {
+		// 既存のIDがある場合 (例: ro:0002470 -> http://purl.obolibrary.org/obo/ro_0002470)
+        // すでにフルURIの場合はそのまま返す
+        if strings.HasPrefix(id, "http") {
+            return id
+        }
+		safeID := strings.ReplaceAll(id, ":", "_")
+		return "http://purl.obolibrary.org/obo/" + safeID
+	}
+	
+	// IDがない場合 (ユーザー独自入力): ラベルをURLエンコードしてID化
+	// 例: "すごく赤い" -> http://my-db.org/user_val/%E3%81%99%E3%81%94...
+	encodedLabel := url.PathEscape(label)
+	return fmt.Sprintf("http://my-db.org/%s/%s", userType, encodedLabel)
+}
+
+func shortenID(uri string) string {
+	// OBO形式
+	if strings.Contains(uri, "/obo/") {
+		parts := strings.Split(uri, "/obo/")
+		return strings.ReplaceAll(parts[len(parts)-1], "_", ":")
+	}
+	// ユーザー定義
+	if strings.Contains(uri, "my-db.org") {
+        // そのまま返すか、適当に短縮
+        return uri
+    }
+	return uri
 }
