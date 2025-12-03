@@ -115,7 +115,7 @@ function DetailContent() {
         登録者: <span className="font-bold">{data.owner_name || "不明"}</span>
       {data.created_at && (
 	<div>
-	 登録日: <span className="font-mono">{new Date(data.created_at).toLocaleString()}</span>
+	 登録日時: <span className="font-mono">{new Date(data.created_at).toLocaleString()}</span>
 	</div>
       )}
       </div>
