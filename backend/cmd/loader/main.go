@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -18,7 +19,7 @@ const (
 	FusekiUser      = "admin"
 	FusekiPass      = "admin123"
 	OboPurlBase     = "http://purl.obolibrary.org/obo/"
-	BatchSize       = 1000 // 一度に送信するトリプル数
+	BatchSize       = 1000
 )
 
 var ontologyConfig = map[string]string{
@@ -31,20 +32,32 @@ var ontologyConfig = map[string]string{
 func main() {
 	log.Println("🚀 Starting OBO to RDF Loader (Fuseki)")
 
+	if err := waitForFuseki(); err != nil {
+		log.Fatalf("❌ Fuseki is not ready: %v", err)
+	}
+
 	for filename, graphURI := range ontologyConfig {
 		filePath := filepath.Join("data", "ontologies", filename)
+		
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			// patoなどはロード済みかもしれないので、ない場合はスキップでもOK
-			// log.Printf("⚠️ File not found: %s (skipping)", filename)
+			// log.Printf("⚠️  File not found: %s (skipping)", filename)
 			continue
 		}
 
 		log.Printf("📝 Loading %s into graph <%s>...", filename, graphURI)
+		
+		if err := clearGraph(graphURI); err != nil {
+			log.Printf("⚠️  Failed to clear graph %s: %v", graphURI, err)
+		}
+
 		if err := processAndLoad(filePath, graphURI); err != nil {
-			log.Fatalf("❌ Failed to load %s: %v", filename, err)
+			log.Printf("❌ Failed to load %s: %v", filename, err)
+		} else {
+			log.Printf("   -> ✅ Loaded %s successfully.", filename)
 		}
 	}
-	log.Println("✅ All ontologies loaded successfully!")
+	
+	log.Println("🎉 All tasks completed.")
 }
 
 func processAndLoad(filePath, graphURI string) error {
@@ -56,70 +69,93 @@ func processAndLoad(filePath, graphURI string) error {
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024) 
+	scanner.Buffer(buf, 1024*1024)
 
 	var triples []string
 	currentID := ""
 	
 	reSynonym := regexp.MustCompile(`^synonym: "([^"]+)"`)
 
-	// バッチ送信ヘルパー
 	sendBatch := func() error {
 		if len(triples) == 0 {
 			return nil
 		}
-		
+		// クエリ組み立て
 		query := fmt.Sprintf("INSERT DATA { GRAPH <%s> { \n%s\n } }", graphURI, strings.Join(triples, "\n"))
 		
+		// 送信
 		if err := sendSPARQL(query); err != nil {
+			// ★エラー時にクエリの冒頭を表示してデバッグしやすくする
+			log.Printf("🔥 Error Query Sample: %s...", query[:min(len(query), 500)])
 			return err
 		}
 		triples = []string{}
-		fmt.Print(".") 
+		fmt.Print(".")
 		return nil
 	}
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
+		// コメント除去 (単純な ! だとURL内の ! も消える可能性があるので注意だが、OBOでは行末コメントが主)
+		// 安全のため、引用符の外側の ! だけ消すのが理想だが、簡易的に実装
+		if idx := strings.Index(line, "!"); idx != -1 {
+			// " がない、もしくは ! が " より後ろにある（閉じてる）場合はコメントとみなす簡易チェック
+			if !strings.Contains(line, "\"") || strings.LastIndex(line, "\"") < idx {
+				line = strings.TrimSpace(line[:idx])
+			}
+		}
+		if line == "" { continue }
+
 		if line == "[Term]" {
 			currentID = ""
 			continue
 		}
+		if line == "[Typedef]" {
+			currentID = ""
+			continue
+		}
 		
+		// --- ID ---
 		if strings.HasPrefix(line, "id: ") {
 			rawID := strings.TrimPrefix(line, "id: ")
+			rawID = strings.TrimSpace(rawID) // ★追加: 前後の空白除去
+
+			// 不正な文字が含まれていたらスキップ (URLとして無効なもの)
+			if strings.ContainsAny(rawID, " <>\"{}|\\^`") {
+				// log.Printf("⚠️ Skipping invalid ID: %s", rawID)
+				currentID = ""
+				continue
+			}
 			if !strings.Contains(rawID, ":") { continue }
-			
+
 			safeID := strings.ReplaceAll(rawID, ":", "_")
-			currentURI := OboPurlBase + safeID
-			currentID = fmt.Sprintf("<%s>", currentURI)
+			currentID = fmt.Sprintf("<%s%s>", OboPurlBase, safeID)
 			
 			triples = append(triples, fmt.Sprintf("%s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/2002/07/owl#Class> .", currentID))
 
 		} else if currentID != "" {
+			// --- Name ---
 			if strings.HasPrefix(line, "name: ") {
 				name := strings.TrimPrefix(line, "name: ")
-				// ★修正: 強力なエスケープ関数を使う
 				name = escapeString(name)
 				triples = append(triples, fmt.Sprintf("%s <http://www.w3.org/2000/01/rdf-schema#label> \"%s\" .", currentID, name))
 			
+			// --- Is_a ---
 			} else if strings.HasPrefix(line, "is_a: ") {
-				parts := strings.Split(line, " ")
-				if len(parts) > 1 {
-					parentRawID := parts[1]
-					if strings.Contains(parentRawID, ":") {
-						parentSafeID := strings.ReplaceAll(parentRawID, ":", "_")
-						triples = append(triples, fmt.Sprintf("%s <http://www.w3.org/2000/01/rdf-schema#subClassOf> <%s%s> .", currentID, OboPurlBase, parentSafeID))
-					}
+				parentRawID := strings.TrimPrefix(line, "is_a: ")
+				parentRawID = strings.TrimSpace(parentRawID) // ★追加
+				
+				if strings.Contains(parentRawID, ":") && !strings.ContainsAny(parentRawID, " <>\"{}|\\^`") {
+					parentSafeID := strings.ReplaceAll(parentRawID, ":", "_")
+					triples = append(triples, fmt.Sprintf("%s <http://www.w3.org/2000/01/rdf-schema#subClassOf> <%s%s> .", currentID, OboPurlBase, parentSafeID))
 				}
 			
+			// --- Synonym ---
 			} else if strings.HasPrefix(line, "synonym: ") {
 				matches := reSynonym.FindStringSubmatch(line)
 				if len(matches) > 1 {
-					syn := matches[1]
-					// ★修正: ここもエスケープ
-					syn = escapeString(syn)
+					syn := escapeString(matches[1])
 					triples = append(triples, fmt.Sprintf("%s <http://www.w3.org/2004/02/skos/core#altLabel> \"%s\" .", currentID, syn))
 				}
 			}
@@ -135,19 +171,26 @@ func processAndLoad(filePath, graphURI string) error {
 	if err := sendBatch(); err != nil {
 		return err
 	}
-	fmt.Println(" Done.")
+	fmt.Println()
 	return scanner.Err()
 }
 
-// ★追加: SPARQL文字列用のエスケープ処理
-func escapeString(s string) string {
-	// バックスラッシュを先にエスケープしないと、後で増殖するので注意
-	s = strings.ReplaceAll(s, "\\", "\\\\") 
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	// 改行コードなども念のため潰しておく
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
+func waitForFuseki() error {
+	// ... (前回と同じなので省略可、そのまま使う) ...
+	// もし消してしまっていたら再掲するので言ってね
+	for i := 0; i < 10; i++ {
+		resp, err := http.Get("http://localhost:3030")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return nil
+}
+
+func clearGraph(graphURI string) error {
+	query := fmt.Sprintf("CLEAR GRAPH <%s>", graphURI)
+	return sendSPARQL(query)
 }
 
 func sendSPARQL(query string) error {
@@ -156,9 +199,11 @@ func sendSPARQL(query string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/sparql-update")
-	req.SetBasicAuth(FusekiUser, FusekiPass)
+	auth := FusekiUser + ":" + FusekiPass
+	encoded := base64.StdEncoding.EncodeToString([]byte(auth))
+	req.Header.Set("Authorization", "Basic "+encoded)
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := &http.Client{Timeout: 120 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -166,9 +211,21 @@ func sendSPARQL(query string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		// ★修正: エラーの内容（Body）を読み取って表示する
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("status %d: %s", resp.StatusCode, string(bodyBytes))
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 	return nil
+}
+
+func escapeString(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return s
+}
+
+func min(a, b int) int {
+	if a < b { return a }
+	return b
 }
