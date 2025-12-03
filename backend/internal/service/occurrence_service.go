@@ -167,6 +167,20 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
 
-func (s *occurrenceService) Search(query string, currentUserID string) ([]repository.OccurrenceDocument, error) {
-	return s.searchRepo.Search(query, currentUserID)
+func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
+	// Step 1: 推論 (Inference)
+	// 検索ワードが「分類名（例: Vertebrata）」かどうかFusekiに問い合わせる
+	var taxonIDs []string
+	if query != "" {
+		// エラーが出ても検索自体は止めない（単なるキーワード検索として続行）
+		ids, err := s.repo.GetDescendantIDs(query)
+		if err == nil && len(ids) > 0 {
+			taxonIDs = ids
+			fmt.Printf("🧠 推論ヒット: '%s' は %d 件の下位分類を含みます\n", query, len(ids))
+		}
+	}
+
+	// Step 2: 検索実行 (Meilisearch)
+	// 推論結果 (taxonIDs) も一緒に渡す
+	return s.searchRepo.Search(query, userID, taxonIDs)
 }

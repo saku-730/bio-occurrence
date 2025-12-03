@@ -21,6 +21,7 @@ type OccurrenceRepository interface {
 	Update(uri string, userID string, req model.OccurrenceRequest) error
 	Delete(uri string) error
 	GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error)
+	GetDescendantIDs(label string) ([]string, error)
 }
 
 type occurrenceRepository struct {
@@ -323,6 +324,45 @@ INSERT DATA {
 	return buf.String(), nil
 }
 
+func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) {
+	// 小文字にして検索（表記ゆれ吸収のため）
+	// NCBI Taxonomyのグラフを指定して検索するのだ
+	query := fmt.Sprintf(`
+		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+		
+		SELECT DISTINCT ?id
+		WHERE {
+		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+			# 1. ラベルが一致するクラスを探す (lcaseで大文字小文字無視)
+			?root rdfs:label ?label .
+			FILTER (lcase(str(?label)) = lcase("%s"))
+
+			# 2. そのクラスの子孫を再帰的に取得 (自分自身も含む)
+			?uri rdfs:subClassOf* ?root .
+		  }
+		}
+		LIMIT 10000 # 安全のため制限
+	`, label)
+
+	results, err := r.sendQuery(query)
+	if err != nil {
+		return nil, err
+	}
+
+	var ids []string
+	for _, b := range results {
+		uri := b["id"].Value
+		// URI (http://purl.obolibrary.org/obo/NCBITaxon_34844) を
+		// アプリで使うID形式 (ncbi:34844) に変換する
+		if strings.Contains(uri, "NCBITaxon_") {
+			parts := strings.Split(uri, "NCBITaxon_")
+			if len(parts) > 1 {
+				ids = append(ids, "ncbi:"+parts[1])
+			}
+		}
+	}
+	return ids, nil
+}
 
 func (r *occurrenceRepository) sendUpdate(sparql string) error {
 	req, err := http.NewRequest("POST", r.updateURL, strings.NewReader(sparql))

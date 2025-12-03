@@ -4,6 +4,7 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/meilisearch/meilisearch-go"
 )
@@ -22,7 +23,7 @@ type OccurrenceDocument struct {
 type SearchRepository interface {
 	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
 	DeleteOccurrence(id string) error
-	Search(query string, currentUserID string) ([]OccurrenceDocument, error) // ★引数追加
+	Search(query string, currentUserID string, taxonIDs []string) ([]OccurrenceDocument, error)
 }
 
 type searchRepository struct {
@@ -86,16 +87,36 @@ func (r *searchRepository) DeleteOccurrence(uri string) error {
 	return err
 }
 
-func (r *searchRepository) Search(query string, currentUserID string) ([]OccurrenceDocument, error) {
-	// フィルタリングロジック
+
+func (r *searchRepository) Search(query string, currentUserID string, taxonIDs []string) ([]OccurrenceDocument, error) {
+	// 1. 権限フィルター (公開 or 自分)
 	filter := "is_public = true"
 	if currentUserID != "" {
 		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
 	}
 
+	if len(taxonIDs) > 0 {
+		// IDリストを "ncbi:1, ncbi:2, ..." という文字列に変換
+		// 注意: 文字列IDなので、シングルクォートで囲む必要がある
+		quotedIDs := make([]string, len(taxonIDs))
+		for i, id := range taxonIDs {
+			quotedIDs[i] = fmt.Sprintf("'%s'", id)
+		}
+		
+		// "taxon_id IN ['ncbi:1', 'ncbi:2']" というフィルタを作る
+		taxonFilter := fmt.Sprintf("taxon_id IN [%s]", strings.Join(quotedIDs, ", "))
+		
+		// 既存フィルタと合体
+		filter = fmt.Sprintf("(%s) AND (%s)", filter, taxonFilter)
+		
+		// ★重要: 推論が効いた場合は、キーワード検索を無効化（空文字）して、フィルタ結果を全表示する
+		// こうしないと「脊椎動物」という文字が入っていないデータが消えてしまう
+		query = ""
+	}
+
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
-		Limit:  20,
-		Filter: filter, // ★適用
+		Limit:  50,
+		Filter: filter,
 	})
 	if err != nil {
 		return nil, err
