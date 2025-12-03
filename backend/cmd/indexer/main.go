@@ -192,6 +192,7 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 	}
 
 	// ★重要: バッチに残っている端数（例: 3200件中の200件）を送信
+	log.Println("batch rest")
 	if len(batch) > 0 {
 		if err := sendBatch(batch); err != nil {
 			return totalCount, err
