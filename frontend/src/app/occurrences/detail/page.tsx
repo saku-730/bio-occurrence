@@ -130,7 +130,7 @@ function DetailContent() {
           {data.traits && data.traits.length > 0 ? (
             data.traits.map((t, i) => (
               <span key={i} className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 border border-gray-200 text-gray-800 rounded-md text-sm">
-                <span className="font-bold text-blue-600">{t.predicate_label || "性質"}</span>
+                <span className="font-bold text-blue-600">{t.predicate_label || "属性"}</span>
                 <ArrowRight className="h-3 w-3 text-gray-400" />
                 <span>{t.value_label}</span>
               </span>

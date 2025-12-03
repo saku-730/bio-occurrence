@@ -165,6 +165,11 @@ func (r *occurrenceRepository) FindByID(uri string) (*model.OccurrenceDetail, er
 	seen := make(map[string]bool)
 	for _, b := range results {
 		predURI := b["pred"].Value
+		
+		if predURI == "" {
+			continue
+		}
+
 		if ignoredPredicates[predURI] {
 			continue
 		}
