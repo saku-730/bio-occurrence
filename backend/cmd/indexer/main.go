@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,10 +20,9 @@ const (
 	MeiliKey    = "masterKey123"
 	IndexName   = "ontology"
 	OboPurlBase = "http://purl.obolibrary.org/obo/"
-	BatchSize   = 2000 // ★2000件ごとに送信する設定
+	BatchSize   = 2000
 )
 
-// TermDoc struct for Meilisearch
 type TermDoc struct {
 	ID       string   `json:"id"`
 	Label    string   `json:"label"`
@@ -31,16 +32,17 @@ type TermDoc struct {
 	Ontology string   `json:"ontology"`
 }
 
-// ファイル名と登録先インデックスの対応表
+// 設定: XSDを追加
 var ontologyConfig = map[string]string{
-	"pato.obo":      "ontology",
-	"ro.obo":        "ontology",
-	"envo.obo":      "ontology",
-	"ncbitaxon.obo": "classification",
+//	"pato.obo":             "ontology",
+//	"ro.obo":               "ontology",
+//	"envo.obo":             "ontology",
+//	"ncbitaxon.obo":        "classification",
+	"tdwg_dwc_simple.xsd": "dwc", // ★XSDファイルを追加
 }
 
 func main() {
-	log.Println("🚀 Starting Multi-Index OBO Indexer")
+	log.Println("🚀 Starting Multi-Index Indexer (XSD Support)")
 
 	client := meilisearch.New(MeiliURL, meilisearch.WithAPIKey(MeiliKey))
 
@@ -52,8 +54,8 @@ func main() {
 }
 
 func RunBatchIndexer(client meilisearch.ServiceManager) error {
-	// インデックス設定
-	indices := []string{"ontology", "classification"}
+	// インデックス初期設定
+	indices := []string{"ontology", "classification", "dwc"}
 	for _, idxName := range indices {
 		client.Index(idxName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
 			PrimaryKey: "id",
@@ -71,12 +73,24 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 	for filename, targetIndex := range ontologyConfig {
 		filePath := filepath.Join("data", "ontologies", filename)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			log.Printf("⚠️  File not found: %s (skipping)", filename)
+			// log.Printf("⚠️  File not found: %s (skipping)", filename)
 			continue
 		}
 
 		log.Printf("📝 Processing %s -> Index: [%s]", filename, targetIndex)
-		count, err := processFileInBatches(client, filePath, targetIndex)
+
+		var count int
+		var err error
+
+		// 拡張子でパーサーを切り替え
+		if strings.HasSuffix(filename, ".xsd") {
+			// XSDパーサー (DwC用)
+			count, err = processXsdFile(client, filePath, targetIndex)
+		} else {
+			// OBOパーサー (その他用)
+			count, err = processFileInBatches(client, filePath, targetIndex)
+		}
+
 		if err != nil {
 			return fmt.Errorf("failed to process %s: %w", filename, err)
 		}
@@ -87,10 +101,117 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 }
 
 // ---------------------------------------------------
-// Streaming OBO Parser & Batch Sender
+// XSD Parser for Darwin Core
 // ---------------------------------------------------
 
+// XSDの構造定義 (必要な部分のみ)
+type XsElement struct {
+	Ref string `xml:"ref,attr"`
+}
+
+type XsAll struct {
+	Elements []XsElement `xml:"element"`
+}
+
+type XsComplexType struct {
+	All XsAll `xml:"all"`
+}
+
+type XsSchema struct {
+	Elements []struct {
+		Name        string        `xml:"name,attr"`
+		ComplexType XsComplexType `xml:"complexType"`
+	} `xml:"element"`
+}
+
+func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex string) (int, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	byteValue, err := io.ReadAll(file)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read file: %w", err)
+	}
+
+	var schema XsSchema
+	// 名前空間を無視するために、構造体タグでは単純な名前だけ指定
+	// encoding/xml はデフォルトで名前空間プレフィックスを無視してマッチングしてくれる
+	if err := xml.Unmarshal(byteValue, &schema); err != nil {
+		return 0, fmt.Errorf("xml unmarshal error: %w", err)
+	}
+
+	var batch []TermDoc
+	totalCount := 0
+
+	// SimpleDarwinRecord の中身を探す
+	for _, rootElem := range schema.Elements {
+		if rootElem.Name == "SimpleDarwinRecord" {
+			for _, elem := range rootElem.ComplexType.All.Elements {
+				// ref="dwc:occurrenceID" のような形式
+				ref := elem.Ref
+				if ref == "" { continue }
+				
+				// "dwc:occurrenceID" -> prefix="dwc", localName="occurrenceID"
+				parts := strings.Split(ref, ":")
+				if len(parts) != 2 { continue }
+				
+				prefix := parts[0]
+				localName := parts[1]
+				
+				// ID生成
+				safeID := prefix + "_" + localName // dwc_occurrenceID
+				
+				// URI生成 (標準的なDwCのURIを推測)
+				uri := ""
+				if prefix == "dwc" {
+					uri = "http://rs.tdwg.org/dwc/terms/" + localName
+				} else if prefix == "dc" {
+					uri = "http://purl.org/dc/elements/1.1/" + localName
+				} else if prefix == "dcterms" {
+					uri = "http://purl.org/dc/terms/" + localName
+				}
+
+				doc := TermDoc{
+					ID:       safeID,
+					Label:    localName, // XSDにはラベルがないのでローカル名を使う
+					En:       localName,
+					Uri:      uri,
+					Ontology: "DwC", // prefixによって変えても良い
+					Synonyms: []string{ref}, // "dwc:occurrenceID" も検索できるように
+				}
+
+				batch = append(batch, doc)
+
+				if len(batch) >= BatchSize {
+					if _, err := client.Index(targetIndex).AddDocuments(batch, nil); err != nil {
+						return totalCount, err
+					}
+					totalCount += len(batch)
+					batch = []TermDoc{}
+				}
+			}
+		}
+	}
+
+	// 残りを送信
+	if len(batch) > 0 {
+		if _, err := client.Index(targetIndex).AddDocuments(batch, nil); err != nil {
+			return totalCount, err
+		}
+		totalCount += len(batch)
+	}
+
+	return totalCount, nil
+}
+
+// ---------------------------------------------------
+// OBO Parser (Existing)
+// ---------------------------------------------------
 func processFileInBatches(client meilisearch.ServiceManager, filePath, targetIndex string) (int, error) {
+	// ... (OBOパーサーの中身は変更なし、そのまま残す) ...
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, err
@@ -99,7 +220,7 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024) // 長い行に対応
+	scanner.Buffer(buf, 1024*1024)
 
 	var batch []TermDoc
 	var currentDoc *TermDoc
@@ -107,7 +228,6 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 
 	reSynonym := regexp.MustCompile(`^synonym: "([^"]+)"`)
 
-	// バッチ送信ヘルパー
 	sendBatch := func(docs []TermDoc) error {
 		if len(docs) == 0 {
 			return nil
@@ -122,43 +242,33 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 
-		// ★修正: [Term] だけでなく [Typedef] など全てのブロック開始を検知
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			// 直前のドキュメントがあれば確定してバッチに追加
 			if currentDoc != nil {
 				if currentDoc.Label == "" { currentDoc.Label = currentDoc.En }
-				// IDがある有効なデータのみ追加
 				if currentDoc.ID != "" {
 					batch = append(batch, *currentDoc)
 				}
 			}
 
-			// バッチサイズを超えたら送信 (途中経過)
 			if len(batch) >= BatchSize {
 				if err := sendBatch(batch); err != nil {
 					return totalCount, err
 				}
 				totalCount += len(batch)
 				fmt.Printf("\r      ... Indexed %d terms", totalCount)
-				batch = []TermDoc{} // バッチクリア
+				batch = []TermDoc{}
 			}
 
-			// 新しいブロックの開始
 			if line == "[Term]" {
 				currentDoc = &TermDoc{Synonyms: []string{}}
 			} else {
-				// [Typedef] など不要なブロックの場合は nil にしてスキップ
 				currentDoc = nil
 			}
 			continue
 		}
 
-		// currentDocがない（Termブロック外）なら読み飛ばす
-		if currentDoc == nil {
-			continue
-		}
+		if currentDoc == nil { continue }
 
-		// 属性のパース
 		if strings.HasPrefix(line, "id: ") {
 			rawID := strings.TrimPrefix(line, "id: ")
 			if !strings.Contains(rawID, ":") { continue }
@@ -171,6 +281,7 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 			if len(parts) > 0 {
 				currentDoc.Ontology = parts[0]
 			}
+
 		} else if strings.HasPrefix(line, "name: ") {
 			name := strings.TrimPrefix(line, "name: ")
 			currentDoc.Label = name
@@ -183,16 +294,12 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 		}
 	}
 
-	// ★重要: ループ終了後、最後の1件をバッチに追加
 	if currentDoc != nil {
 		if currentDoc.Label == "" { currentDoc.Label = currentDoc.En }
 		if currentDoc.ID != "" {
 			batch = append(batch, *currentDoc)
 		}
 	}
-
-	// ★重要: バッチに残っている端数（例: 3200件中の200件）を送信
-	log.Println("batch rest")
 	if len(batch) > 0 {
 		if err := sendBatch(batch); err != nil {
 			return totalCount, err
@@ -200,7 +307,7 @@ func processFileInBatches(client meilisearch.ServiceManager, filePath, targetInd
 		totalCount += len(batch)
 		fmt.Printf("\r      ... Indexed %d terms (Final flush)\n", totalCount)
 	} else {
-		fmt.Println() // 改行のみ
+		fmt.Println()
 	}
 
 	return totalCount, scanner.Err()
