@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, User, Database } from "lucide-react";
+import { LogOut, User, Database, Settings } from "lucide-react"; // Settingsアイコン追加
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -12,9 +12,8 @@ export default function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16 items-center">
           
-          {/* 左側エリア：ロゴとナビゲーション */}
+          {/* 左側: ロゴとナビゲーション */}
           <div className="flex items-center gap-8">
-            {/* ロゴ（トップページへのリンク） */}
             <Link 
               href="/" 
               className="text-xl font-black text-blue-600 flex items-center gap-2 hover:opacity-80 transition-opacity"
@@ -23,7 +22,6 @@ export default function Header() {
               <span>Bio Occurrence DB</span>
             </Link>
 
-            {/* ナビゲーションリンク (ログイン時のみ表示) */}
             {user && (
               <nav className="hidden md:flex gap-6">
                 <Link 
@@ -46,18 +44,21 @@ export default function Header() {
           <div className="flex items-center gap-4">
             {user ? (
               <>
-                <div className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-full">
-                  <User className="h-4 w-4 text-gray-400" />
-                  <span className="font-medium">{user.username}</span>
-                </div>
+                {/* ★修正: ユーザー名をリンクに変更 */}
+                <Link 
+                  href="/settings"
+                  className="flex items-center gap-2 text-sm text-gray-700 bg-gray-50 px-3 py-1.5 rounded-full hover:bg-gray-100 transition-colors border border-transparent hover:border-gray-200"
+                >
+                  <User className="h-4 w-4 text-gray-500" />
+                  <span className="font-bold">{user.username}</span>
+                </Link>
                 
                 <button
                   onClick={logout}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-md transition-colors"
                   title="ログアウト"
                 >
-                  <LogOut className="h-4 w-4" />
-                  <span className="hidden sm:inline">ログアウト</span>
+                  <LogOut className="h-4 w-4" />ログアウト
                 </button>
               </>
             ) : (
