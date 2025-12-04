@@ -38,13 +38,15 @@ func (r *userRepository) Create(user *model.User) error {
 
 func (r *userRepository) FindByEmail(email string) (*model.User, error) {
 	user := &model.User{}
-	query := `SELECT id, username, email, password_hash, created_at, updated_at FROM users WHERE email = $1`
+
+	query := `SELECT id, username, email, password_hash, is_superuser, created_at, updated_at FROM users WHERE email = $1`
 	
 	err := r.db.QueryRow(query, email).Scan(
-		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt,
+		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.IsSuperuser, &user.CreatedAt, &user.UpdatedAt,
 	)
+
 	if err == sql.ErrNoRows {
-		return nil, nil // 見つからない場合はnilを返す
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -54,11 +56,13 @@ func (r *userRepository) FindByEmail(email string) (*model.User, error) {
 
 func (r *userRepository) FindByID(id string) (*model.User, error) {
 	user := &model.User{}
-	query := `SELECT id, username, email, password_hash, created_at, updated_at FROM users WHERE id = $1`
+
+	query := `SELECT id, username, email, password_hash, is_superuser, created_at, updated_at FROM users WHERE id = $1`
 	
 	err := r.db.QueryRow(query, id).Scan(
-		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt,
+		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.IsSuperuser, &user.CreatedAt, &user.UpdatedAt,
 	)
+
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
