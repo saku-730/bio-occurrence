@@ -54,7 +54,7 @@ export default function RegisterPage() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">パスワード</label>
+            <label className="block text-sm font-medium text-gray-700">パスワード 8文字以上</label>
             <input
               type="password"
               value={password}
@@ -71,7 +71,7 @@ export default function RegisterPage() {
           </button>
         </form>
         
-        <div className="mt-4 text-center text-sm">
+        <div className="mt-4 text-center text-sm text-gray-700">
           すでにアカウントをお持ちですか？{" "}
           <Link href="/login" className="text-blue-600 hover:underline">
             ログイン
