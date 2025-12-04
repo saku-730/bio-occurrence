@@ -15,8 +15,8 @@ export default function Home() {
             Bio Occurrence DB
           </h1>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto">
-            生物のオカレンス（出現）データを集約・管理・検索するための<br className="hidden sm:inline" />
-            次世代プラットフォームなのだ。
+            生物のオカレンスデータを集約・管理・検索するための<br className="hidden sm:inline" />
+            ソフト・プラットフォーム。
           </p>
         </div>
 
@@ -34,7 +34,7 @@ export default function Home() {
               <h2 className="text-2xl font-bold text-gray-800">データを登録</h2>
             </div>
             <p className="text-gray-500">
-              新しいオカレンスデータを登録するのだ。標本、観察、文献など。
+              新しいオカレンスデータを登録する
             </p>
           </Link>
 
@@ -50,7 +50,7 @@ export default function Home() {
               <h2 className="text-2xl font-bold text-gray-800">データを探す</h2>
             </div>
             <p className="text-gray-500">
-              登録されたデータを検索・閲覧するのだ。地図や統計も見れるのだ。
+              登録されたデータを検索・閲覧する
             </p>
           </Link>
         </div>

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { meiliClient, INDEX_ONTOLOGY } from "@/lib/meilisearch";
 import { Search, Loader2, Plus, ArrowRight } from "lucide-react";
+import { meiliClient, INDEX_ONTOLOGY, INDEX_DWC } from "@/lib/meilisearch";
 
 // 検索結果の型
 export type SearchResult = {
@@ -38,18 +38,19 @@ export default function OntologySearch({ onAdd }: Props) {
 
   const [loading, setLoading] = useState(false);
 
-  // 検索実行 (汎用)
-  const search = async (text: string, setResults: (res: SearchResult[]) => void, filter?: string) => {
+  const search = async (
+    indexName: string, // ★引数追加
+    text: string, 
+    setResults: (res: SearchResult[]) => void
+  ) => {
     if (!text) {
       setResults([]);
       return;
     }
     setLoading(true);
     try {
-      // Meilisearchで検索
-      // filterを使って、述語には RO(関係性) を、値には PATO/ENVO/NCBI を優先的に出すと親切だけど、
-      // 今回はシンプルに全検索するのだ。
-      const res = await meiliClient.index(INDEX_ONTOLOGY).search(text, { limit: 10, filter });
+      // 指定されたインデックスで検索！
+      const res = await meiliClient.index(indexName).search(text, { limit: 10 });
       setResults(res.hits as SearchResult[]);
     } catch (error) {
       console.error(error);
@@ -63,14 +64,14 @@ export default function OntologySearch({ onAdd }: Props) {
     setPredQuery(val);
     setPredID(""); // 入力を変えたらIDはリセット（独自入力状態）
     // RO (Relation Ontology) に絞って検索すると精度が良い
-    search(val, setPredResults); 
+    search(INDEX_DWC, val, setPredResults);
   };
 
   // 値の入力ハンドラ
   const handleValChange = (val: string) => {
     setValQuery(val);
     setValID(""); // 入力を変えたらIDはリセット
-    search(val, setValResults);
+    search(INDEX_ONTOLOGY, val, setValResults);
   };
 
   // 候補選択ハンドラ
@@ -173,7 +174,7 @@ export default function OntologySearch({ onAdd }: Props) {
       </div>
       
       <div className="text-xs text-gray-400">
-        ※ 候補にない言葉もそのまま登録できるのだ（独自タグになる）。
+        ※ 値は候補にない言葉もそのまま登録できる（独自タグになる）。
       </div>
     </div>
   );

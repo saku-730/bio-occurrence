@@ -10,3 +10,4 @@ export const meiliClient = new MeiliSearch({
 
 export const INDEX_ONTOLOGY = 'ontology';
 export const INDEX_CLASSIFICATION = 'classification';
+export const INDEX_DWC = 'dwc';

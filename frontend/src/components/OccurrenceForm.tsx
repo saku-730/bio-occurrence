@@ -198,7 +198,7 @@ export default function OccurrenceForm({ id, initialData }: Props) {
         </label>
       </div>
       <p className="text-xs text-gray-500 mb-4 pl-1">
-        ※ チェックを外すと、あなた以外には表示されなくなるのだ（プライベートモード）。
+        ※ チェックを外すと、自分以外には表示されなくなる（プライベートモード）。
       </p>
 
       {/* 送信ボタン */}
@@ -221,7 +221,7 @@ export default function OccurrenceForm({ id, initialData }: Props) {
       )}
       {status === "error" && (
          <div className="p-3 bg-red-100 text-red-700 rounded text-center">
-           ❌ 送信エラーなのだ。ログイン切れかも？
+           ❌ 送信エラー。ログイン切れかも？ログアウトして再ログインを試してください
          </div>
        )}
     </form>
