@@ -23,7 +23,6 @@ type OccurrenceRepository interface {
 	Delete(uri string) error
 	GetTaxonStats(taxonURI string, rawID string) (*model.TaxonStats, error)
 	GetDescendantIDs(label string) ([]string, error)
-	GetAncestorIDs(taxonID string) ([]string, error)
 	GetTaxonIDByLabel(label string) (string, error)
 }
 
@@ -290,47 +289,6 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	return ids, nil
 }
 
-// ★修正: 祖先ID取得
-func (r *occurrenceRepository) GetAncestorIDs(taxonID string) ([]string, error) {
-    uri := resolveURI(taxonID, "", "user_taxon")
-	if strings.Contains(uri, "user_taxon") {
-		return []string{taxonID}, nil
-	}
-    
-	query := fmt.Sprintf(`
-		PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-		SELECT ?ancestor
-		WHERE {
-		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
-			<%s> rdfs:subClassOf* ?ancestor .
-		  }
-		}
-	`, uri)
-
-	results, err := r.sendQuery(query)
-	if err != nil {
-		return nil, err
-	}
-
-	var ancestors []string
-	for _, b := range results {
-		if val, ok := b["ancestor"]; ok {
-			uri := val.Value
-			if strings.Contains(uri, "NCBITaxon_") {
-				parts := strings.Split(uri, "NCBITaxon_")
-				if len(parts) > 1 {
-					ancestors = append(ancestors, "ncbi:"+parts[1])
-				}
-			}
-		}
-	}
-	
-	if len(ancestors) == 0 {
-		ancestors = append(ancestors, taxonID)
-	}
-	
-	return ancestors, nil
-}
 
 // ★修正: 名前からIDを引く (検索用)
 // label だけでなく altLabel も検索！

@@ -17,12 +17,10 @@ type OccurrenceDocument struct {
 	OwnerID    string   `json:"owner_id"`
 	OwnerName  string   `json:"owner_name"`
 	IsPublic   bool     `json:"is_public"`
-	Ancestors  []string `json:"ancestors"` // ★追加
 }
 
 type SearchRepository interface {
-	// 引数に ancestors を追加
-	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string, ancestors []string) error
+	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
 	DeleteOccurrence(id string) error
 	// 引数に targetTaxonID を追加
 	Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error)
@@ -37,8 +35,7 @@ func NewSearchRepository(url, key string) SearchRepository {
 	client := meilisearch.New(url, meilisearch.WithAPIKey(key))
 	indexName := "occurrences"
 
-	// フィルタ用属性に ancestors を追加
-	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id", "ancestors"}
+	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id"}
 	convertedAttributes := make([]interface{}, len(filterAttributes))
 	for i, v := range filterAttributes {
 		convertedAttributes[i] = v
@@ -57,7 +54,7 @@ func NewSearchRepository(url, key string) SearchRepository {
 	}
 }
 
-func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string, ownerID, ownerName string, ancestors []string) error {
+func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri string, ownerID, ownerName string) error {
 	doc := OccurrenceDocument{
 		ID:         getIDFromURI(uri),
 		TaxonID:    req.TaxonID,
@@ -67,7 +64,6 @@ func (r *searchRepository) IndexOccurrence(req model.OccurrenceRequest, uri stri
 		OwnerID:    ownerID,
 		OwnerName:  ownerName,
 		IsPublic:   req.IsPublic,
-		Ancestors:  ancestors, // ★セット
 	}
 	
 	for _, t := range req.Traits {
@@ -96,16 +92,6 @@ func (r *searchRepository) Search(query string, currentUserID string, targetTaxo
 		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
 	}
 
-	// 祖先フィルター (分類検索)
-	if targetTaxonID != "" {
-		// ancestors配列の中に targetTaxonID が含まれているかチェック
-		// Meilisearchでは配列フィールドに対して = で「含まれるか」を判定できる
-		taxonFilter := fmt.Sprintf("ancestors = '%s'", targetTaxonID)
-		filter = fmt.Sprintf("(%s) AND (%s)", filter, taxonFilter)
-		
-		// 分類指定がある場合はキーワード検索はオプションにする（フィルタリングが主役）
-		// ただしqueryがあればAND条件になるのでそのまま渡してOK
-	}
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
 		Limit:  50,
 		Filter: filter,

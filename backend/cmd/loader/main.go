@@ -23,9 +23,9 @@ const (
 )
 
 var ontologyConfig = map[string]string{
-	"pato.obo":      "http://my-db.org/ontology/pato",
-	"ro.obo":        "http://my-db.org/ontology/ro",
-	"envo.obo":      "http://my-db.org/ontology/envo",
+	"pato.obo":      "http://my-db.org/ontology/",
+	"ro.obo":        "http://my-db.org/ontology/",
+	"envo.obo":      "http://my-db.org/ontology/",
 	"ncbitaxon.obo": "http://my-db.org/ontology/ncbitaxon",
 }
 

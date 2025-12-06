@@ -4,7 +4,6 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"github.com/saku-730/bio-occurrence/backend/internal/repository"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -48,13 +47,6 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 		return "", fmt.Errorf("user not found")
 	}
 
-	// 2. 祖先の取得
-	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
-	if err != nil {
-		log.Printf("⚠️ 祖先の取得に失敗: %v", err)
-		ancestors = []string{req.TaxonID}
-	}
-
 	occUUID := uuid.New().String()
 	occURI := "http://my-db.org/occ/" + occUUID
 	
@@ -65,7 +57,7 @@ func (s *occurrenceService) Register(userID string, req model.OccurrenceRequest)
 	}
 
 	// 4. Meilisearchにも保存
-	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username, ancestors); err != nil {
+	if err := s.searchRepo.IndexOccurrence(req, occURI, user.ID, user.Username); err != nil {
 		return occURI, err 
 	}
 
@@ -136,20 +128,13 @@ func (s *occurrenceService) Modify(userID string, id string, req model.Occurrenc
 		return fmt.Errorf("permission denied: あなたのデータではないのだ")
 	}
 
-	// 2. 祖先の取得
-	ancestors, err := s.repo.GetAncestorIDs(req.TaxonID)
-	if err != nil {
-		log.Printf("⚠️ 祖先の取得に失敗: %v", err)
-		ancestors = []string{req.TaxonID}
-	}
-
 	// 3. Fuseki更新
 	if err := s.repo.Update(targetURI, userID, req); err != nil {
 		return err
 	}
 	
 	// 4. Meilisearch更新 (ここで user 変数が必要だったのだ！)
-	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username, ancestors)
+	return s.searchRepo.IndexOccurrence(req, targetURI, user.ID, user.Username)
 }
 
 func (s *occurrenceService) Remove(userID string, id string) error {

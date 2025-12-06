@@ -27,6 +27,7 @@ type TermDoc struct {
 	ID       string   `json:"id"`
 	Label    string   `json:"label"`
 	En       string   `json:"en"`
+	Ja	 string   `json:"ja"`
 	Uri      string   `json:"uri"`
 	Synonyms []string `json:"synonyms"`
 	Ontology string   `json:"ontology"`
@@ -67,6 +68,14 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 		}
 		client.Index(idxName).UpdateFilterableAttributes(&convertedAttributes)
 		log.Printf("⚙️  Configured index: %s", idxName)
+	}
+
+	dwcJaMap, err := loadJapanesXML("data/ontologies/tdwg_dwc_simple_ja.xsd")
+	if err != nil {
+		log.Printf("⚠️  Failed to load dwc_ja.xml: %v (continuing without JA)", err)
+		dwcJaMap = make(map[string]string)
+	} else {
+		log.Printf("✅ Loaded %d Japanese terms from dwc_ja.xml", len(dwcJaMap))
 	}
 
 	// ファイル処理
@@ -164,6 +173,20 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 				// ID生成
 				safeID := prefix + "_" + localName // dwc_occurrenceID
 				
+				enLabel := desc.Label
+				if enLabel == "" {
+					enLabel = localName
+				}
+
+				// ★日本語ラベル (マップから検索)
+				jaLabel := jaMap[aboutURI]
+				
+				// 表示用ラベル: 日本語があればそっちを優先、なければ英語
+				displayLabel := enLabel
+				if jaLabel != "" {
+					displayLabel = jaLabel
+				}
+
 				// URI生成 (標準的なDwCのURIを推測)
 				uri := ""
 				if prefix == "dwc" {
@@ -176,11 +199,16 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 
 				doc := TermDoc{
 					ID:       safeID,
-					Label:    localName, // XSDにはラベルがないのでローカル名を使う
-					En:       localName,
+					Label:    displayLabel, // XSDにはラベルがないのでローカル名を使う
+					En:       enLabel,
+					Ja:       jaLabel,
 					Uri:      uri,
 					Ontology: "DwC", // prefixによって変えても良い
 					Synonyms: []string{ref}, // "dwc:occurrenceID" も検索できるように
+				}
+
+				if jaLabel != "" {
+					doc.Synonyms = append(doc.Synonyms, jaLabel)
 				}
 
 				batch = append(batch, doc)

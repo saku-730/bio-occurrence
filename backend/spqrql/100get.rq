@@ -1,5 +1,7 @@
-SELECT *
+SELECT ?s ?p ?o
 WHERE {
-  ?s ?p ?o .
+  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+    ?s ?p ?o .
+  }
 }
-LIMIT 100
+LIMIT 1000
