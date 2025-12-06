@@ -122,12 +122,12 @@ func (h *OccurrenceHandler) GetTaxonStats(c *gin.Context) {
 // GET /api/search
 func (h *OccurrenceHandler) Search(c *gin.Context) {
 	query := c.Query("q")
+	taxonQuery := c.Query("taxon")
 	
-	// ★修正: 任意認証でユーザーIDを取得
 	userID := h.getOptionalUserID(c)
 
 	// Service経由で検索実行 (userIDも渡す)
-	docs, err := h.svc.Search(query, userID)
+	docs, err := h.svc.Search(query, taxonQuery, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

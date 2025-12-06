@@ -16,7 +16,7 @@ type OccurrenceService interface {
 	Modify(userID string, id string, req model.OccurrenceRequest) error
 	Remove(userID string, id string) error
 	GetTaxonStats(rawID string) (*model.TaxonStats, error)
-	Search(query string, currentUserID string) ([]repository.OccurrenceDocument, error)
+	Search(query string, taxonQuery string, currentUserID string) ([]repository.OccurrenceDocument, error)
 }
 
 type occurrenceService struct {
@@ -171,18 +171,23 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 	return s.repo.GetTaxonStats(taxonURI, rawID)
 }
 
-func (s *occurrenceService) Search(query string, userID string) ([]repository.OccurrenceDocument, error) {
+func (s *occurrenceService) Search(query string, taxonQuery string, userID string) ([]repository.OccurrenceDocument, error) {
 	targetTaxonID := ""
 
-	if query != "" {
+    // ★変更: queryからの推論をやめて、taxonQueryが指定された場合のみID解決を行う
+	if taxonQuery != "" {
 		// 名前からIDを引く
-		id, err := s.repo.GetTaxonIDByLabel(query)
+		id, err := s.repo.GetTaxonIDByLabel(taxonQuery)
 		if err == nil && id != "" {
 			targetTaxonID = id
-			query = "" // IDが見つかったらキーワード検索は無効化
-			fmt.Printf("🧠 推論検索: %s -> %s の子孫を検索します\n", query, targetTaxonID)
-		}
+			fmt.Printf("🧠 分類検索: %s -> ID: %s の子孫を検索します\n", taxonQuery, targetTaxonID)
+		} else {
+            // 指定された生物名が見つからない場合は、ヒット0件にするためにありえないIDを入れるか、
+            // そのまま検索してヒットなしにする（ここではIDが見つからなければフィルタかけない実装にするか、エラーにするか選べるけど、今回は「見つからなければフィルタしない」でおくのだ）
+            fmt.Printf("⚠️ 分類名 '%s' のIDが見つからなかったのだ\n", taxonQuery)
+        }
 	}
 
+    // query (キーワード) はそのまま Meilisearch の全文検索に渡す
 	return s.searchRepo.Search(query, userID, targetTaxonID)
 }

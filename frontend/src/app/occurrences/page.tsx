@@ -20,18 +20,22 @@ export default function OccurrenceList() {
   const [loading, setLoading] = useState(true);
   
   const [searchQuery, setSearchQuery] = useState("");
+  const [taxonQuery, setTaxonQuery] = useState("");
+
   const [debounceTimer, setDebounceTimer] = useState<NodeJS.Timeout | null>(null);
 
   const [showMineOnly, setShowMineOnly] = useState(true);
 
   const { token, user } = useAuth();
 
-  const fetchData = async (query: string) => {
+  const fetchData = async (keyword: string, taxon: string) => {
     setLoading(true);
     try {
-      const url = query 
-        ? `http://localhost:8080/api/search?q=${encodeURIComponent(query)}`
-        : "http://localhost:8080/api/occurrences";
+      const params = new URLSearchParams();
+      if (keyword) params.append("q", keyword);
+      if (taxon) params.append("taxon", taxon);
+
+      const url = `http://localhost:8080/api/search?${params.toString()}`;
 
       const headers: HeadersInit = {};
       if (token) {
@@ -63,17 +67,17 @@ export default function OccurrenceList() {
     });
   };
   useEffect(() => {
-    fetchData(searchQuery);
+    fetchData(searchQuery, taxonQuery);
   }, [token]);
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
+  const handleSearch = (newKeyword: string, newTaxon: string) => {
+    setSearchQuery(newKeyword);
+    setTaxonQuery(newTaxon);
 
     if (debounceTimer) clearTimeout(debounceTimer);
 
     const timer = setTimeout(() => {
-      fetchData(val);
+      fetchData(newKeyword, newTaxon);
     }, 300);
     setDebounceTimer(timer);
   };
@@ -94,29 +98,53 @@ export default function OccurrenceList() {
             オカレンス一覧
           </h1>
           
-          <div className="flex flex-col md:flex-row gap-4 items-center w-full md:w-auto">
-            {user && (
-              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer bg-white px-3 py-2 rounded-md border border-gray-200 shadow-sm hover:bg-gray-50 transition-colors select-none whitespace-nowrap">
-                <input
-                  type="checkbox"
-                  checked={showMineOnly}
-                  onChange={(e) => setShowMineOnly(e.target.checked)}
-                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                />
-                自分のデータだけ表示
-              </label>
-            )}
 
-            <div className="relative w-full md:w-96">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={handleSearch}
-                placeholder="キーワード検索 (生物名, 特徴, ID...)"
-                className="w-full p-2 pl-9 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm text-black"
-              />
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+	<div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-center">
+            
+            {/* 1. 分類検索 (専用フォーム) */}
+            <div className="relative w-full md:w-64">
+                <label className="text-xs font-bold text-gray-500 mb-1 block">分類群 (Taxon)</label>
+                <div className="relative">
+                    <input
+                        type="text"
+                        value={taxonQuery}
+                        onChange={(e) => handleSearch(searchQuery, e.target.value)}
+                        placeholder="例: Eisenia, Insecta..."
+                        className="w-full p-2 pl-9 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-green-500 focus:outline-none text-sm text-black bg-green-50/50"
+                    />
+                    <Database className="absolute left-3 top-2.5 h-4 w-4 text-green-600" />
+                </div>
             </div>
+
+            {/* 2. キーワード検索 (その他の項目) */}
+            <div className="relative w-full md:flex-1">
+                <label className="text-xs font-bold text-gray-500 mb-1 block">キーワード (特徴, メモ, ID...)</label>
+                <div className="relative">
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => handleSearch(e.target.value, taxonQuery)}
+                        placeholder="その他のキーワード検索..."
+                        className="w-full p-2 pl-9 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm text-black"
+                    />
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                </div>
+            </div>
+
+            {/* 3. 自分のデータのみフィルタ */}
+            {user && (
+              <div className="md:pt-5">
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer bg-gray-50 px-3 py-2 rounded-md border border-gray-200 hover:bg-gray-100 transition-colors select-none whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={showMineOnly}
+                      onChange={(e) => setShowMineOnly(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    自分のデータだけ
+                  </label>
+              </div>
+            )}
           </div>
         </div>
 
@@ -197,7 +225,7 @@ export default function OccurrenceList() {
                   ) : (
                     <tr>
                       <td colSpan={5} className="px-6 py-12 text-center text-gray-400 bg-gray-50">
-                        {list.length > 0 ? "条件に合うデータが見つからないのだ..." : "データが見つからないのだ..."}
+                        {list.length > 0 ? "条件に合うデータが見つからない..." : "データが見つからない..."}
                       </td>
                     </tr>
                   )}
