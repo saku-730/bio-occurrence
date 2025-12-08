@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import TaxonSearch, { TaxonResult } from "./TaxonSearch";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // Props定義
 type Props = {
   id?: string;
@@ -89,8 +90,8 @@ export default function OccurrenceForm({ id, initialData }: Props) {
 
     try {
       const url = id 
-        ? `http://localhost:8080/api/occurrences/${id}`
-        : "http://localhost:8080/api/occurrences";
+        ? `${API_URL}/api/occurrences/${id}`
+        : `${API_URL}/api/occurrences/`;
       
       const method = id ? "PUT" : "POST";
 

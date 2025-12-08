@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Loader2, Bug, Search, Database, Eye } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // リスト表示用のデータ型
 type ListItem = {
   id: string;
@@ -35,7 +36,7 @@ export default function OccurrenceList() {
       if (keyword) params.append("q", keyword);
       if (taxon) params.append("taxon", taxon);
 
-      const url = `http://localhost:8080/api/search?${params.toString()}`;
+      const url = `${API_URL}/api/search?${params.toString()}`;
 
       const headers: HeadersInit = {};
       if (token) {

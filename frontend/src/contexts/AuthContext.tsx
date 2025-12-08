@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // ユーザー情報の型 (Goのモデルと合わせる)
 type User = {
   id: string;
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ログイン処理
   const login = async (email: string, pass: string) => {
-    const res = await fetch("http://localhost:8080/api/auth/login", {
+    const res = await fetch("${API_URL}/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password: pass }),
@@ -72,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 登録処理
   const register = async (name: string, email: string, pass: string) => {
-    const res = await fetch("http://localhost:8080/api/auth/register", {
+    const res = await fetch("${API_URL}/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: name, email, password: pass }),

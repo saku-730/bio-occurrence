@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2, ArrowLeft, ArrowRight, Tag, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext"; // ★追加: AuthContextを使う
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
 type Trait = {
   predicate_id: string;
   predicate_label: string;
@@ -43,7 +45,7 @@ function DetailContent() {
     if (!confirm("本当に削除してもよろしいですか？この操作は取り消せません。")) return;
     
     try {
-      const res = await fetch(`http://localhost:8080/api/occurrences/${id}`, {
+      const res = await fetch(`${API_URL}/api/occurrences/${id}`, {
         method: "DELETE",
         headers: { 
             "Authorization": `Bearer ${token}` // ★追加: これがないと401になる！
@@ -67,7 +69,7 @@ function DetailContent() {
 
     const fetchDetail = async () => {
       try {
-        const res = await fetch(`http://localhost:8080/api/occurrences/${id}`);
+      	const res = await fetch(`${API_URL}/api/occurrences/${id}`); 
         if (!res.ok) throw new Error("取得失敗");
         const json = await res.json();
         setData(json);

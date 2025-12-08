@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import OccurrenceForm from "@/components/OccurrenceForm"; // 改造したフォームを使う
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
 function EditContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id");
@@ -13,7 +15,7 @@ function EditContent() {
   useEffect(() => {
     if (!id) return;
     // 既存データを取得してフォームの初期値にする
-    fetch(`http://localhost:8080/api/occurrences/${id}`)
+    fetch(`${API_URL}/api/occurrences/${id}`)
       .then((res) => res.json())
       .then((data) => {
         // APIのレスポンスをフォームの形に合わせる（traitsにuri等は不要なので）
