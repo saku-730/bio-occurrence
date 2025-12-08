@@ -1,0 +1,8 @@
+PREFIX ex: <http://my-db.org/data/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT ?p ?o
+WHERE {
+  # Goで登録したID「TestTanuki_001」を指定して検索
+  ex:TestTanuki_001 ?p ?o 
+}

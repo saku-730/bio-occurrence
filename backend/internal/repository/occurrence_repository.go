@@ -250,7 +250,7 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 		SELECT DISTINCT (?uri AS ?id)
 		WHERE {
 		  # 1. オントロジーから「その名前の概念」と「子孫」を探す
-		  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+		  GRAPH <http://my-db.org/ncbitaxon> {
 			# ★修正: UNIONを使って別名も検索
 			{ ?root rdfs:label ?name } UNION { ?root skos:altLabel ?name }
 			FILTER (lcase(str(?name)) = lcase("%s"))
@@ -261,7 +261,7 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 		  # 2. 実際にオカレンスデータで使われているIDだけに絞る
 		  ?occ dwc:scientificNameID ?uri .
 		}
-		LIMIT 1000
+		LIMIT 100000
 	`, label)
 
 	results, err := r.sendQuery(query)
@@ -270,18 +270,24 @@ func (r *occurrenceRepository) GetDescendantIDs(label string) ([]string, error) 
 	}
 
 	var ids []string
+
 	for _, b := range results {
 		if val, ok := b["id"]; ok {
 			uri := val.Value
+			// ★変更: IDのフォーマット揺れ（ncbi: vs NCBITaxon:）を吸収するため、両方のパターンを追加するのだ！
 			if strings.Contains(uri, "NCBITaxon_") {
 				parts := strings.Split(uri, "NCBITaxon_")
 				if len(parts) > 1 {
-					ids = append(ids, "ncbi:"+parts[1])
+					idNum := parts[1]
+					ids = append(ids, "ncbi:"+idNum)       // 推奨フォーマット
+					ids = append(ids, "NCBITaxon:"+idNum)  // フロントエンドからの登録データ用
 				}
 			} else if strings.Contains(uri, "ncbi_") {
 				parts := strings.Split(uri, "ncbi_")
 				if len(parts) > 1 {
-					ids = append(ids, "ncbi:"+parts[1])
+					idNum := parts[1]
+					ids = append(ids, "ncbi:"+idNum)
+					ids = append(ids, "NCBITaxon:"+idNum)
 				}
 			}
 		}

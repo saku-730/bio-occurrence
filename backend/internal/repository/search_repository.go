@@ -4,6 +4,7 @@ import (
 	"github.com/saku-730/bio-occurrence/backend/internal/model"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/meilisearch/meilisearch-go"
 )
@@ -22,8 +23,7 @@ type OccurrenceDocument struct {
 type SearchRepository interface {
 	IndexOccurrence(req model.OccurrenceRequest, id string, ownerID string, ownerName string) error
 	DeleteOccurrence(id string) error
-	// 引数に targetTaxonID を追加
-	Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error)
+	Search(query string, currentUserID string, targetTaxonID []string) ([]OccurrenceDocument, error)
 }
 
 type searchRepository struct {
@@ -35,14 +35,22 @@ func NewSearchRepository(url, key string) SearchRepository {
 	client := meilisearch.New(url, meilisearch.WithAPIKey(key))
 	indexName := "occurrences"
 
-	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id"}
+	// 1. フィルタ可能な属性の設定
+	// taxon_id で絞り込むために、ここに追加が必要なのだ！
+	filterAttributes := []string{"traits", "taxon_label", "is_public", "owner_id", "taxon_id"}
+	
+	// ライブラリのバージョンによっては []string をそのまま渡せるけど、既存コードに合わせて interface変換しているのだ
 	convertedAttributes := make([]interface{}, len(filterAttributes))
 	for i, v := range filterAttributes {
 		convertedAttributes[i] = v
 	}
-
 	client.Index(indexName).UpdateFilterableAttributes(&convertedAttributes)
 	
+	// 2. ★検索対象（キーワード検索）の属性設定
+	// ここを設定することで、query検索が taxon_label を無視して remarks と traits だけを見るようになるのだ
+	searchableAttributes := []string{"remarks", "traits"}
+	client.Index(indexName).UpdateSearchableAttributes(&searchableAttributes)
+
 	// Primary Keyの設定
 	client.Index(indexName).UpdateIndex(&meilisearch.UpdateIndexRequestParams{
 		PrimaryKey: "id",
@@ -85,18 +93,33 @@ func (r *searchRepository) DeleteOccurrence(uri string) error {
 	return err
 }
 
-func (r *searchRepository) Search(query string, currentUserID string, targetTaxonID string) ([]OccurrenceDocument, error) {
+func (r *searchRepository) Search(query string, currentUserID string, targetTaxonIDs []string) ([]OccurrenceDocument, error) {
 	// フィルタリングロジック
 	filter := "is_public = true"
 	if currentUserID != "" {
 		filter = fmt.Sprintf("(is_public = true OR owner_id = '%s')", currentUserID)
 	}
 
+	if len(targetTaxonIDs) > 0 {
+		// IN ["ncbi:1", "ncbi:2", ...] の形式を作る
+		// 文字列の配列を ' で囲んでカンマ区切りにする
+		quotedIDs := make([]string, len(targetTaxonIDs))
+		for i, id := range targetTaxonIDs {
+			quotedIDs[i] = fmt.Sprintf("'%s'", id)
+		}
+		inFilter := fmt.Sprintf("taxon_id IN [%s]", strings.Join(quotedIDs, ", "))
+		
+		filter = fmt.Sprintf("%s AND %s", filter, inFilter)
+	}
+
+	// ログ出力（デバッグ用）
+	fmt.Printf("🔎 Meili Filter: %s\n", filter)
+
 	searchRes, err := r.client.Index(r.indexName).Search(query, &meilisearch.SearchRequest{
 		Limit:  50,
 		Filter: filter,
 	})
-	fmt.Print(searchRes)
+	// fmt.Print(searchRes) // デバッグ用出力はコメントアウトしておいたのだ
 	if err != nil {
 		return nil, err
 	}

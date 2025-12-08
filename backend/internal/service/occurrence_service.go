@@ -172,22 +172,25 @@ func (s *occurrenceService) GetTaxonStats(rawID string) (*model.TaxonStats, erro
 }
 
 func (s *occurrenceService) Search(query string, taxonQuery string, userID string) ([]repository.OccurrenceDocument, error) {
-	targetTaxonID := ""
+	var targetTaxonIDs []string
 
-    // ★変更: queryからの推論をやめて、taxonQueryが指定された場合のみID解決を行う
 	if taxonQuery != "" {
-		// 名前からIDを引く
-		id, err := s.repo.GetTaxonIDByLabel(taxonQuery)
-		if err == nil && id != "" {
-			targetTaxonID = id
-			fmt.Printf("🧠 分類検索: %s -> ID: %s の子孫を検索します\n", taxonQuery, targetTaxonID)
+		// GetDescendantIDs は、「そのTaxonおよび子孫」かつ「実際にデータが存在するID」を返してくれる
+		// これにより、データがないIDまで検索クエリに含める無駄を省けるのだ
+		ids, err := s.repo.GetDescendantIDs(taxonQuery)
+		if err == nil && len(ids) > 0 {
+			targetTaxonIDs = ids
+			fmt.Printf("🧠 推論検索: '%s' の子孫を含む %d 件のIDで検索します\n", taxonQuery, len(ids))
 		} else {
-            // 指定された生物名が見つからない場合は、ヒット0件にするためにありえないIDを入れるか、
-            // そのまま検索してヒットなしにする（ここではIDが見つからなければフィルタかけない実装にするか、エラーにするか選べるけど、今回は「見つからなければフィルタしない」でおくのだ）
-            fmt.Printf("⚠️ 分類名 '%s' のIDが見つからなかったのだ\n", taxonQuery)
-        }
+			fmt.Printf("⚠️ 分類名 '%s' に該当するデータ（子孫含む）が見つからなかったのだ\n", taxonQuery)
+			// ヒットなしにするためにダミーを入れるか、空配列のままにして全件検索にならないように制御する
+			// ここでは「空配列＝ヒットなし」として扱うため、明示的にありえない値をセットする手もあるが、
+			// SearchRepo側で len > 0 のときだけフィルタ追加しているので、
+			// フィルタを追加しないと「全件検索」になってしまう恐れがある。
+			// なので、見つからなかった場合は「存在しないID」でフィルタして0件にするのが安全なのだ。
+			targetTaxonIDs = []string{"NO_HIT"} 
+		}
 	}
 
-    // query (キーワード) はそのまま Meilisearch の全文検索に渡す
-	return s.searchRepo.Search(query, userID, targetTaxonID)
+	return s.searchRepo.Search(query, userID, targetTaxonIDs)
 }

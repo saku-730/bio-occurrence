@@ -1,0 +1,7 @@
+SELECT ?s ?p ?o
+WHERE {
+  GRAPH <http://my-db.org/ontology/ncbitaxon> {
+    ?s ?p ?o .
+  }
+}
+LIMIT 1000
