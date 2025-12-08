@@ -19,7 +19,7 @@ export default function Header() {
               className="text-xl font-black text-blue-600 flex items-center gap-2 hover:opacity-80 transition-opacity"
             >
               <Database className="h-6 w-6" />
-              <span>Bio Occurrence DB</span>
+              <span>Occurrence Web</span>
             </Link>
 
             {user && (

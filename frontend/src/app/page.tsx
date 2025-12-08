@@ -12,7 +12,7 @@ export default function Home() {
             <Database className="w-16 h-16" />
           </div>
           <h1 className="text-5xl font-black text-gray-900 tracking-tight">
-            Bio Occurrence DB
+            Occurrence Web
           </h1>
           <p className="text-xl text-gray-500 max-w-2xl mx-auto">
             生物のオカレンスデータを集約・管理・検索するための<br className="hidden sm:inline" />
