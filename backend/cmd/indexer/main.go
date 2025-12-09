@@ -27,7 +27,7 @@ type TermDoc struct {
 	ID       string   `json:"id"`
 	Label    string   `json:"label"`
 	En       string   `json:"en"`
-	Ja	 string   `json:"ja"`
+	Ja       string   `json:"ja"`
 	Uri      string   `json:"uri"`
 	Synonyms []string `json:"synonyms"`
 	Ontology string   `json:"ontology"`
@@ -70,6 +70,7 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 		log.Printf("⚙️  Configured index: %s", idxName)
 	}
 
+	// ★修正: 日本語XML読み込み関数を定義して呼び出す
 	dwcJaMap, err := loadJapanesXML("data/ontologies/tdwg_dwc_simple_ja.xsd")
 	if err != nil {
 		log.Printf("⚠️  Failed to load dwc_ja.xml: %v (continuing without JA)", err)
@@ -94,7 +95,8 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 		// 拡張子でパーサーを切り替え
 		if strings.HasSuffix(filename, ".xsd") {
 			// XSDパーサー (DwC用)
-			count, err = processXsdFile(client, filePath, targetIndex)
+			// ★修正: dwcJaMap を渡すように変更
+			count, err = processXsdFile(client, filePath, targetIndex, dwcJaMap)
 		} else {
 			// OBOパーサー (その他用)
 			count, err = processFileInBatches(client, filePath, targetIndex)
@@ -107,6 +109,19 @@ func RunBatchIndexer(client meilisearch.ServiceManager) error {
 	}
 
 	return nil
+}
+
+// ★追加: 日本語XML読み込み関数のスタブ
+// 実際にはここでXMLをパースして、URI -> 日本語ラベル のマップを作るのだ
+func loadJapanesXML(path string) (map[string]string, error) {
+	// とりあえず空のマップを返す（エラー回避用）
+	// 必要に応じて実装するのだ
+	m := make(map[string]string)
+	
+	// 例: 手動でいくつか登録しておく場合
+	// m["http://rs.tdwg.org/dwc/terms/occurrenceID"] = "オカレンスID"
+
+	return m, nil
 }
 
 // ---------------------------------------------------
@@ -133,7 +148,8 @@ type XsSchema struct {
 	} `xml:"element"`
 }
 
-func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex string) (int, error) {
+// ★修正: jaMap 引数を追加
+func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex string, jaMap map[string]string) (int, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, err
@@ -146,8 +162,6 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 	}
 
 	var schema XsSchema
-	// 名前空間を無視するために、構造体タグでは単純な名前だけ指定
-	// encoding/xml はデフォルトで名前空間プレフィックスを無視してマッチングしてくれる
 	if err := xml.Unmarshal(byteValue, &schema); err != nil {
 		return 0, fmt.Errorf("xml unmarshal error: %w", err)
 	}
@@ -163,7 +177,6 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 				ref := elem.Ref
 				if ref == "" { continue }
 				
-				// "dwc:occurrenceID" -> prefix="dwc", localName="occurrenceID"
 				parts := strings.Split(ref, ":")
 				if len(parts) != 2 { continue }
 				
@@ -173,21 +186,10 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 				// ID生成
 				safeID := prefix + "_" + localName // dwc_occurrenceID
 				
-				enLabel := desc.Label
-				if enLabel == "" {
-					enLabel = localName
-				}
+				// ★修正: desc.Label は未定義なので localName を使う
+				enLabel := localName
 
-				// ★日本語ラベル (マップから検索)
-				jaLabel := jaMap[aboutURI]
-				
-				// 表示用ラベル: 日本語があればそっちを優先、なければ英語
-				displayLabel := enLabel
-				if jaLabel != "" {
-					displayLabel = jaLabel
-				}
-
-				// URI生成 (標準的なDwCのURIを推測)
+				// ★修正: URI生成ロジックを上に持ってきたのだ
 				uri := ""
 				if prefix == "dwc" {
 					uri = "http://rs.tdwg.org/dwc/terms/" + localName
@@ -197,14 +199,23 @@ func processXsdFile(client meilisearch.ServiceManager, filePath, targetIndex str
 					uri = "http://purl.org/dc/terms/" + localName
 				}
 
+				// ★修正: aboutURI は未定義なので、生成した uri を使ってマップから引く
+				jaLabel := jaMap[uri]
+				
+				// 表示用ラベル
+				displayLabel := enLabel
+				if jaLabel != "" {
+					displayLabel = jaLabel
+				}
+
 				doc := TermDoc{
 					ID:       safeID,
-					Label:    displayLabel, // XSDにはラベルがないのでローカル名を使う
+					Label:    displayLabel,
 					En:       enLabel,
 					Ja:       jaLabel,
 					Uri:      uri,
-					Ontology: "DwC", // prefixによって変えても良い
-					Synonyms: []string{ref}, // "dwc:occurrenceID" も検索できるように
+					Ontology: "DwC",
+					Synonyms: []string{ref},
 				}
 
 				if jaLabel != "" {
